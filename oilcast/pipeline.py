@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import pickle
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -125,18 +126,51 @@ def interval_coverage(pred_lr, true_lr, quantiles) -> dict:
 
 
 # ----------------------------------------------------------------------------
-# Entrenamiento + evaluación de un split
+# Entrenamiento + evaluación: conjunto (ensemble) de semillas
 # ----------------------------------------------------------------------------
-def fit_and_eval(ds: Dataset, arch: str, params: dict, split: Split, n_epochs=None, early_stop=True,
-                 seed: int | None = None):
-    kw = {} if seed is None else {"seed": seed}
-    model, best_epoch, secs = train_model(
-        arch, params, split.X_tr, split.y_tr,
-        split.X_ev if early_stop else None, split.y_ev_scaled if early_stop else None,
-        n_epochs=n_epochs, **kw)
-    pred = split.pre.unscale_targets(predict(model, split.X_ev))
-    price0 = ds.df["brent"].values[split.ev_origins]
-    return model, best_epoch, secs, pred, horizon_metrics(pred, split.y_ev, price0)
+@dataclass
+class EnsembleRun:
+    """Conjunto de redes (una por semilla) entrenadas n_epochs épocas sobre un split.
+    preds[s, e] = predicción (log-rentabilidad) del miembro s tras la época e+1."""
+    preds: np.ndarray            # (n_semillas, n_épocas, n_eval, 3)
+    split: Split
+    models: list                 # modelos tras la última época
+    seconds: float
+    n_params: int                # parámetros de UNA red
+
+    @property
+    def n_epochs(self) -> int:
+        return self.preds.shape[1]
+
+    def at_epoch(self, ds: Dataset, epoch: int):
+        """(predicción del conjunto, métricas del conjunto, métricas de cada miembro) en la época dada."""
+        member = self.preds[:, epoch - 1]
+        ens = member.mean(axis=0)
+        price0 = ds.df["brent"].values[self.split.ev_origins]
+        return (ens, horizon_metrics(ens, self.split.y_ev, price0),
+                [horizon_metrics(m, self.split.y_ev, price0) for m in member])
+
+
+def train_ensemble(ds: Dataset, arch: str, params: dict, split: Split, seeds: list[int],
+                   n_epochs: int, eval_name: str = "validacion", track=None) -> EnsembleRun:
+    """Entrena un conjunto de redes idénticas con semillas distintas durante n_epochs épocas.
+    El conjunto de evaluación solo se MIDE en cada época (curvas); nunca decide nada aquí.
+    track(run_name) -> context manager que devuelve el callback on_epoch (o None)."""
+    track = track or (lambda name: nullcontext(None))
+    has_eval = len(split.X_ev) > 0
+    preds, models, secs = [], [], 0.0
+    for seed in seeds:
+        mon = {eval_name: (split.X_ev, split.y_ev_scaled)} if has_eval else None
+        with track(f"s{seed}") as cb:
+            model, s, _, collected = train_model(arch, params, split.X_tr, split.y_tr, n_epochs,
+                                                 seed=seed, monitors=mon, on_epoch=cb,
+                                                 collect=eval_name if has_eval else None)
+        secs += s
+        models.append(model)
+        if has_eval:
+            preds.append([split.pre.unscale_targets(p) for p in collected])
+    arr = np.array(preds) if has_eval else np.empty((len(seeds), n_epochs, 0, 3))
+    return EnsembleRun(arr, split, models, secs, count_params(models[0]))
 
 
 # ----------------------------------------------------------------------------
@@ -147,22 +181,25 @@ PROD_PRE = MODELS_DIR / "production_preprocessor.pkl"
 PROD_META = MODELS_DIR / "production_meta.json"
 
 
-def train_production(arch: str, params: dict, n_epochs: int, quantiles: dict,
-                     test_metrics: list[dict], extra_meta: dict | None = None, ds: Dataset | None = None):
-    """Entrena la arquitectura elegida con TODOS los datos disponibles y guarda los artefactos."""
+def train_production(arch: str, params: dict, n_epochs: int, quantiles: dict, test_metrics: list[dict],
+                     extra_meta: dict | None = None, ds: Dataset | None = None, track=None):
+    """Entrena el conjunto de la arquitectura elegida con TODOS los datos disponibles durante
+    las épocas elegidas en la validación cruzada y guarda los artefactos."""
+    from .config import ENSEMBLE_SEEDS
     ds = ds or Dataset.load()
-    split = make_split(ds, train_end=None)
-    model, _, secs = train_model(arch, params, split.X_tr, split.y_tr, n_epochs=n_epochs)
+    run = train_ensemble(ds, arch, params, make_split(ds, train_end=None), ENSEMBLE_SEEDS,
+                         n_epochs, track=track)
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    torch.save(model.state_dict(), PROD_MODEL)
+    torch.save({"members": [m.state_dict() for m in run.models]}, PROD_MODEL)
     with open(PROD_PRE, "wb") as fh:
-        pickle.dump(split.pre, fh)
+        pickle.dump(run.split.pre, fh)
     meta = {
         "arch": arch, "params": params, "n_epochs": n_epochs,
+        "n_members": len(run.models), "seeds": ENSEMBLE_SEEDS,
         "features": FEATURES, "window": WINDOW, "horizons": HORIZONS,
         "interval_quantiles": quantiles, "test_metrics": test_metrics,
-        "n_params": count_params(model), "train_seconds": round(secs, 1),
+        "n_params": run.n_params, "train_seconds": round(run.seconds, 1),
         "data_until": str(ds.index[-1].date()),
         "trained_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
         **(extra_meta or {}),
@@ -176,20 +213,23 @@ def load_production():
     with open(PROD_PRE, "rb") as fh:
         pre = pickle.load(fh)
     p = meta["params"]
-    model = RecurrentForecaster(meta["arch"], len(meta["features"]), p["hidden"], p["layers"],
+    members = []
+    for sd in torch.load(PROD_MODEL, map_location="cpu")["members"]:
+        m = RecurrentForecaster(meta["arch"], len(meta["features"]), p["hidden"], p["layers"],
                                 p.get("dropout", 0.2))
-    model.load_state_dict(torch.load(PROD_MODEL, map_location="cpu"))
-    model.eval()
-    return model, pre, meta
+        m.load_state_dict(sd)
+        m.eval()
+        members.append(m)
+    return members, pre, meta
 
 
 def forecast(ds: Dataset | None = None, bundle=None) -> dict:
-    """Predicción para los tres horizontes desde el último dato disponible."""
+    """Predicción del conjunto para los tres horizontes desde el último dato disponible."""
     ds = ds or Dataset.load()
-    model, pre, meta = bundle or load_production()
+    members, pre, meta = bundle or load_production()
     x = pre.transform(ds.feats)
-    last = len(x) - 1
-    pred_lr = pre.unscale_targets(predict(model, make_windows(x, np.array([last]))))[0]
+    X = make_windows(x, np.array([len(x) - 1]))
+    pred_lr = pre.unscale_targets(np.mean([predict(m, X) for m in members], axis=0))[0]
     p0 = float(ds.df["brent"].iloc[-1])
     last_date = ds.index[-1]
     out = {"last_date": last_date, "last_price": p0, "horizons": {}}

@@ -1,7 +1,6 @@
 """Las tres redes recurrentes (RNN simple, LSTM, GRU) y su bucle de entrenamiento."""
 from __future__ import annotations
 
-import copy
 import time
 
 import numpy as np
@@ -44,50 +43,87 @@ def _masked_mse(pred, y):
     return (diff ** 2).sum() / mask.sum().clamp(min=1)
 
 
-def train_model(arch: str, params: dict, X_tr, y_tr, X_val=None, y_val=None,
-                n_epochs: int | None = None, verbose: bool = False, seed: int = SEED):
-    """Entrena una red. Con datos de validación aplica early stopping;
-    sin ellos entrena un número fijo de épocas (n_epochs).
-    Devuelve (modelo, mejor_época, segundos)."""
+def _naive_mse(y):
+    """Error del modelo ingenuo (predecir 0 = precio sin cambios) sobre objetivos escalados."""
+    mask = ~torch.isnan(y)
+    return float((torch.nan_to_num(y) ** 2).sum() / mask.sum().clamp(min=1))
+
+
+def _ratio_per_horizon(pred, y):
+    """Error / error_ingenuo para cada horizonte (columna)."""
+    out = []
+    for j in range(y.shape[1]):
+        m = ~torch.isnan(y[:, j])
+        if m.sum() == 0:
+            out.append(float("nan"))
+            continue
+        out.append(float(((pred[m, j] - y[m, j]) ** 2).mean() / (y[m, j] ** 2).mean()))
+    return out
+
+
+def _masked_huber(pred, y, delta: float):
+    """Error de Huber: cuadrático para errores pequeños y lineal para los grandes (> delta),
+    de modo que los días extremos (2008, 2020, 2022, 2026) no dominan el aprendizaje."""
+    mask = ~torch.isnan(y)
+    diff = torch.where(mask, pred - torch.nan_to_num(y), torch.zeros_like(pred))
+    a = diff.abs()
+    loss = torch.where(a <= delta, 0.5 * diff ** 2, delta * (a - 0.5 * delta))
+    return loss.sum() / mask.sum().clamp(min=1)
+
+
+def train_model(arch: str, params: dict, X_tr, y_tr, n_epochs: int, seed: int = SEED,
+                monitors: dict | None = None, on_epoch=None, collect: str | None = None):
+    """Entrena una red durante n_epochs épocas (el número de épocas es un hiperparámetro
+    elegido con la validación cruzada, no se decide durante el entrenamiento).
+
+    - Se optimiza el error de Huber (robusto a días extremos); las curvas se miden en MSE.
+    - monitors: {nombre: (X, y)} conjuntos que solo se MIDEN por época para las curvas.
+    - on_epoch(epoch, info): callback por época con las curvas (error / error_ingenuo).
+    - collect: nombre de un monitor cuyas predicciones se guardan en cada época
+      (para construir la curva del conjunto de semillas).
+
+    Devuelve (modelo, segundos, historial, predicciones_por_época)."""
     cfg = {**TRAIN_DEFAULTS, **params}
     set_seed(seed)
     model = RecurrentForecaster(arch, X_tr.shape[-1], cfg["hidden"], cfg["layers"], cfg["dropout"])
     opt = torch.optim.Adam(model.parameters(), lr=cfg["lr"], weight_decay=cfg["weight_decay"])
 
     Xt, yt = torch.from_numpy(X_tr), torch.from_numpy(y_tr)
-    has_val = X_val is not None
-    if has_val:
-        Xv, yv = torch.from_numpy(X_val), torch.from_numpy(y_val)
-    epochs = n_epochs or cfg["max_epochs"]
+    naive_tr = _naive_mse(yt)
+    evals = {name: (torch.from_numpy(X), torch.from_numpy(y))
+             for name, (X, y) in (monitors or {}).items() if len(X)}
+    naive_ev = {k: _naive_mse(y) for k, (_, y) in evals.items()}
 
-    best_loss, best_state, best_epoch, bad = np.inf, None, epochs, 0
+    history, collected = [], []
     t0 = time.perf_counter()
-    for epoch in range(1, epochs + 1):
+    for epoch in range(1, n_epochs + 1):
         model.train()
         perm = torch.randperm(len(Xt))
+        tot, nb = 0.0, 0
         for i in range(0, len(Xt), cfg["batch_size"]):
             b = perm[i:i + cfg["batch_size"]]
             opt.zero_grad()
-            loss = _masked_mse(model(Xt[b]), yt[b])
+            pred = model(Xt[b])
+            loss = _masked_huber(pred, yt[b], cfg["huber_delta"])
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
-        if has_val:
-            model.eval()
-            with torch.no_grad():
-                vloss = _masked_mse(model(Xv), yv).item()
-            if verbose:
-                print(f"    época {epoch:2d}  val_loss={vloss:.4f}")
-            if vloss < best_loss - 1e-4:
-                best_loss, best_state, best_epoch, bad = vloss, copy.deepcopy(model.state_dict()), epoch, 0
-            else:
-                bad += 1
-                if bad >= cfg["patience"]:
-                    break
-    if best_state is not None:
-        model.load_state_dict(best_state)
+            tot, nb = tot + _masked_mse(pred.detach(), yt[b]).item(), nb + 1
+
+        info = {"epoch": epoch, "train": tot / nb / naive_tr}
+        model.eval()
+        with torch.no_grad():
+            for name, (X, y) in evals.items():
+                pred = model(X)
+                info[name] = _masked_mse(pred, y).item() / naive_ev[name]
+                info[f"{name}_h"] = _ratio_per_horizon(pred, y)
+                if name == collect:
+                    collected.append(pred.numpy())
+        history.append(info)
+        if on_epoch:
+            on_epoch(epoch, info)
     model.eval()
-    return model, best_epoch, time.perf_counter() - t0
+    return model, time.perf_counter() - t0, history, collected
 
 
 def predict(model: nn.Module, X: np.ndarray) -> np.ndarray:

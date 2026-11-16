@@ -218,3 +218,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Registros de TensorBoard (curvas de entrenamiento)
+runs/
+
+# Modelos entrenados: se publican en Hugging Face Hub, no en GitHub
+models/

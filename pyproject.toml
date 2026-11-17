@@ -12,8 +12,6 @@ dependencies = [
     "yfinance (>=1.8.0,<2.0.0)",
     "torch (>=2.15.0,<3.0.0)",
     "scikit-learn (>=1.9.1,<2.0.0)",
-    "streamlit (>=1.67.0,<2.0.0)",
-    "plotly (>=7.1.0,<8.0.0)",
     "matplotlib (>=3.11.2,<4.0.0)",
     "tabulate (>=0.10.0,<0.11.0)",
     "tensorboard (>=2.21.0,<3.0.0)"
@@ -27,3 +25,13 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 package-mode = false
+
+# torch se instala desde el índice CPU de PyTorch (~200 MB) en lugar del de PyPI, que en
+# Linux arrastra las librerías CUDA (>2 GB). Es la rueda que usa GitHub Actions.
+[tool.poetry.dependencies]
+torch = { source = "pytorch-cpu" }
+
+[[tool.poetry.source]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+priority = "explicit"

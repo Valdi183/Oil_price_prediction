@@ -1,0 +1,70 @@
+{
+  "_comment": "Receta del modelo de producción elegido en la comparativa (scripts/train_compare.py). La usa scripts/retrain.py cuando no existe models/production_meta.json (p. ej. en GitHub Actions). No editar a mano: copiar de models/production_meta.json tras una nueva comparativa.",
+  "comparison_generated": "2026-11-15 17:43",
+  "comparison_data_until": "2026-11-11",
+  "n_params": 13763,
+  "arch": "RNN",
+  "params": {
+    "hidden": 64,
+    "layers": 2,
+    "lr": 0.001
+  },
+  "n_epochs": 2,
+  "interval_quantiles": {
+    "corto": [
+      -0.06493634421854745,
+      0.060423053174580604
+    ],
+    "medio": [
+      -0.17203760762726258,
+      0.2181713552350146
+    ],
+    "largo": [
+      -0.3777897177026378,
+      0.3827066109485709
+    ]
+  },
+  "test_metrics": [
+    {
+      "horizonte": "corto",
+      "h": 5,
+      "n": 1003,
+      "MSE": 28.922305546221306,
+      "MAE": 3.6281540748823415,
+      "RMSE": 5.37794622009381,
+      "MAE_ingenuo": 3.6596111665004987,
+      "RMSE_ingenuo": 5.441117918900294,
+      "mejora_RMSE_%": 1.1610058768814713,
+      "mejora_MAE_%": 0.8595746976102325,
+      "acierto_direccion_%": 53.900000000000006
+    },
+    {
+      "horizonte": "medio",
+      "h": 63,
+      "n": 945,
+      "MSE": 277.1099572817924,
+      "MAE": 10.708428431388631,
+      "RMSE": 16.64661999571662,
+      "MAE_ingenuo": 11.587121693121691,
+      "RMSE_ingenuo": 17.95705146310711,
+      "mejora_RMSE_%": 7.297587079275125,
+      "mejora_MAE_%": 7.583360950240703,
+      "acierto_direccion_%": 62.116402116402114
+    },
+    {
+      "horizonte": "largo",
+      "h": 252,
+      "n": 756,
+      "MSE": 423.3729896015894,
+      "MAE": 14.704734463098838,
+      "RMSE": 20.576029490686228,
+      "MAE_ingenuo": 15.562275132275133,
+      "RMSE_ingenuo": 21.74301921057732,
+      "mejora_RMSE_%": 5.3671926082987875,
+      "mejora_MAE_%": 5.510381110007579,
+      "acierto_direccion_%": 79.8941798941799
+    }
+  ],
+  "score_cv": 0.9090313729531906,
+  "selected_by": "menor error de validación cruzada del conjunto"
+}

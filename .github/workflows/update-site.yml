@@ -1,13 +1,22 @@
-# Actualiza los datos, reentrena el modelo de producción, exporta los JSON de la web
-# y la despliega en GitHub Pages. Todo el cálculo se hace en Python dentro del runner;
+# Actualiza los datos, calcula la predicción con el modelo ya entrenado, exporta los JSON de
+# la web y la despliega en GitHub Pages. Todo el cálculo se hace en Python dentro del runner;
 # la web (site/) solo muestra los ficheros generados.
+#
+# Incorporar datos y reentrenar son procesos distintos:
+#   - ACTUALIZACIÓN (por defecto): descarga los datos nuevos y el modelo publicado en Hugging
+#     Face Hub, y el último dato pasa por el modelo. NO se entrena nada.
+#   - REENTRENAMIENTO (solo a mano, "Run workflow" marcando "Reentrenar"): entrena el conjunto
+#     con todos los datos y publica la nueva versión en el Hub (requiere el secreto HF_TOKEN).
 #
 # Se ejecuta:
 #   - cada día laborable a las 07:30 UTC (la EIA publica el Brent spot con retraso)
 #   - a mano desde la pestaña Actions ("Run workflow") = botón "Actualizar ahora" de la web
 #   - al hacer push en main de cualquier fichero que afecte a la web o al pipeline
 #
-# Requisito: Settings → Pages → Build and deployment → Source: "GitHub Actions".
+# Requisitos:
+#   - Settings → Pages → Build and deployment → Source: "GitHub Actions"
+#   - Settings → Secrets and variables → Actions → Variables: HF_MODEL_REPO = "usuario/nombre"
+#   - Settings → Secrets and variables → Actions → Secrets:   HF_TOKEN (escritura, para reentrenar)
 
 name: Actualizar predicción y desplegar la web
 
@@ -15,6 +24,11 @@ on:
   schedule:
     - cron: "30 7 * * 1-5"
   workflow_dispatch:
+    inputs:
+      retrain:
+        description: "Reentrenar el modelo con todos los datos y publicarlo en Hugging Face"
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -37,9 +51,12 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
+env:
+  HF_MODEL_REPO: ${{ vars.HF_MODEL_REPO }}
+
 jobs:
   build:
-    name: Descargar datos, reentrenar y exportar
+    name: Descargar datos, predecir y exportar
     runs-on: ubuntu-latest
     steps:
       - name: Código
@@ -72,9 +89,29 @@ jobs:
         if: steps.download.outcome == 'failure'
         run: echo "::warning::La descarga de datos falló; se usa la instantánea de data/petroleo_dataset.csv"
 
+      - name: Descargar el modelo entrenado (Hugging Face Hub)
+        id: fetch
+        if: ${{ inputs.retrain != true }}
+        continue-on-error: true
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}   # solo necesario si el repo del modelo es privado
+        run: poetry run python scripts/model_hub.py download
+
       - name: Reentrenar el modelo de producción
+        # Solo a mano o, como respaldo, si el Hub aún no tiene modelo (primer despliegue).
         # models/ no está versionado: retrain.py usa config/production_recipe.json
-        run: poetry run python scripts/retrain.py
+        if: ${{ inputs.retrain == true || steps.fetch.outcome == 'failure' }}
+        run: |
+          if [ "${{ inputs.retrain }}" != "true" ]; then
+            echo "::warning::No se pudo descargar el modelo de Hugging Face; se entrena uno temporal (revisa HF_MODEL_REPO)"
+          fi
+          poetry run python scripts/retrain.py
+
+      - name: Publicar el modelo reentrenado en Hugging Face Hub
+        if: ${{ inputs.retrain == true }}
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: poetry run python scripts/model_hub.py upload
 
       - name: Exportar los JSON de la web
         run: poetry run python scripts/export_site.py
@@ -83,9 +120,9 @@ jobs:
         continue-on-error: true
         run: |
           {
-            echo "### Web actualizada"
+            echo "### Web actualizada (${{ inputs.retrain == true && 'con reentrenamiento' || 'solo datos nuevos, sin reentrenar' }})"
             echo
-            poetry run python -c "import json; m=json.load(open('site/data/meta.json')); f=json.load(open('site/data/forecast.json')); print(f\"- Datos hasta **{m['data_until']}** · último precio **{f['last_price']} \$**\"); print(f\"- Modelo {m['arch_label']} reentrenado el {m['trained_at']} ({m['train_seconds']} s)\"); [print(f\"- {k}: {h['price']} \$ ({h['change_pct']:+} %) · rango {h['low']}–{h['high']} \$ · fiabilidad {h['reliability']['label']}\") for k, h in f['horizons'].items()]"
+            poetry run python -c "import json; m=json.load(open('site/data/meta.json')); f=json.load(open('site/data/forecast.json')); print(f\"- Datos hasta **{m['data_until']}** · último precio **{f['last_price']} \$**\"); print(f\"- Modelo {m['arch_label']} entrenado el {m['trained_at']} con datos hasta {m['model_data_until']}\"); [print(f\"- {k}: {h['price']} \$ ({h['change_pct']:+} %) · rango {h['low']}–{h['high']} \$ · fiabilidad {h['reliability']['label']}\") for k, h in f['horizons'].items()]"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Subir site/ como artefacto de Pages

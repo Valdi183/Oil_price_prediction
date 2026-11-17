@@ -6,6 +6,10 @@ comparativa) con los datos más recientes. Pensado para ejecutarse periódicamen
 Uso:
     poetry run python scripts/retrain.py              # reentrena con data/petroleo_dataset.csv
     poetry run python scripts/retrain.py --download   # descarga datos nuevos y reentrena
+    poetry run python scripts/model_hub.py upload     # publica el nuevo modelo en Hugging Face
+
+Reentrenar es un proceso distinto de incorporar datos: la actualización diaria solo pasa el
+último dato por el modelo ya entrenado (scripts/model_hub.py download + export_site.py).
 
 La receta (red, hiperparámetros, épocas, cuantiles del intervalo y métricas de test) se lee
 de models/production_meta.json si existe y, si no (p. ej. en un runner limpio de GitHub
@@ -35,9 +39,8 @@ def load_recipe() -> dict:
     receta versionada que escribió la comparativa."""
     if PROD_META.exists():
         return json.loads(PROD_META.read_text(encoding="utf-8"))
-    # TODO Hugging Face: cuando los modelos estén publicados en el Hub, descargar aquí
-    # production_model.pt, production_preprocessor.pkl y production_meta.json en lugar
-    # de reentrenar desde cero en cada ejecución.
+    # En el día a día no se reentrena: la Action descarga el modelo publicado en Hugging Face
+    # (scripts/model_hub.py download). Este script solo se usa al reentrenar a mano.
     if RECIPE.exists():
         return json.loads(RECIPE.read_text(encoding="utf-8"))
     raise FileNotFoundError(

@@ -1,0 +1,106 @@
+# Actualiza los datos, reentrena el modelo de producción, exporta los JSON de la web
+# y la despliega en GitHub Pages. Todo el cálculo se hace en Python dentro del runner;
+# la web (site/) solo muestra los ficheros generados.
+#
+# Se ejecuta:
+#   - cada día laborable a las 07:30 UTC (la EIA publica el Brent spot con retraso)
+#   - a mano desde la pestaña Actions ("Run workflow") = botón "Actualizar ahora" de la web
+#   - al hacer push en main de cualquier fichero que afecte a la web o al pipeline
+#
+# Requisito: Settings → Pages → Build and deployment → Source: "GitHub Actions".
+
+name: Actualizar predicción y desplegar la web
+
+on:
+  schedule:
+    - cron: "30 7 * * 1-5"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "scripts/**"
+      - "oilcast/**"
+      - "config/**"
+      - "reports/**"
+      - "data/**"
+      - "pyproject.toml"
+      - "poetry.lock"
+      - ".github/workflows/update-site.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Descargar datos, reentrenar y exportar
+    runs-on: ubuntu-latest
+    steps:
+      - name: Código
+        uses: actions/checkout@v4
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Poetry
+        run: pipx install poetry
+
+      - name: Caché del entorno virtual (.venv, in-project = true)
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py3.12-${{ hashFiles('poetry.lock') }}
+
+      - name: Dependencias (torch desde el índice CPU de PyTorch)
+        run: poetry install --no-root --no-interaction
+
+      - name: Descargar datos recientes (FRED + Yahoo Finance)
+        id: download
+        # Si una fuente falla, se continúa con la instantánea versionada en data/
+        continue-on-error: true
+        run: poetry run python scripts/download_data.py
+
+      - name: Aviso si la descarga falló
+        if: steps.download.outcome == 'failure'
+        run: echo "::warning::La descarga de datos falló; se usa la instantánea de data/petroleo_dataset.csv"
+
+      - name: Reentrenar el modelo de producción
+        # models/ no está versionado: retrain.py usa config/production_recipe.json
+        run: poetry run python scripts/retrain.py
+
+      - name: Exportar los JSON de la web
+        run: poetry run python scripts/export_site.py
+
+      - name: Resumen
+        continue-on-error: true
+        run: |
+          {
+            echo "### Web actualizada"
+            echo
+            poetry run python -c "import json; m=json.load(open('site/data/meta.json')); f=json.load(open('site/data/forecast.json')); print(f\"- Datos hasta **{m['data_until']}** · último precio **{f['last_price']} \$**\"); print(f\"- Modelo {m['arch_label']} reentrenado el {m['trained_at']} ({m['train_seconds']} s)\"); [print(f\"- {k}: {h['price']} \$ ({h['change_pct']:+} %) · rango {h['low']}–{h['high']} \$ · fiabilidad {h['reliability']['label']}\") for k, h in f['horizons'].items()]"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Subir site/ como artefacto de Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: Desplegar en GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Desplegar
+        id: deployment
+        uses: actions/deploy-pages@v4

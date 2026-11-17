@@ -4,6 +4,8 @@ Caso de uso III de la asignatura *Aprendizaje automático* (UAX): comparar una *
 
 **Web de la aplicación:** <https://valdi183.github.io/Oil_price_prediction/>
 
+**Modelo en producción (Hugging Face Hub):** <https://huggingface.co/Valdi183/brent-rnn-forecast>
+
 > Herramienta de apoyo a la decisión, no es una recomendación de inversión.
 
 ## Qué hace la aplicación
@@ -98,11 +100,13 @@ Para activarlo en un fork: **Settings → Pages → Build and deployment → Sou
 
 Validación cruzada walk-forward (2017-18, 2019-20 con COVID, 2021-22 con Ucrania), test final 2023 → hoy, cada modelo = conjunto de 5 semillas, épocas elegidas con la curva media de la CV. Detalle en [`reports/comparison.md`](reports/comparison.md) y [`reports/significance.md`](reports/significance.md).
 
-| Red (config.) | Parámetros | Mejora RMSE vs ingenuo: corto | medio | largo | Error CV |
-|---|---:|---:|---:|---:|---:|
-| **RNN** (64×2, 2 ép.) — *en producción* | 13.763 | **+1,2 %** (p = 0,01) | **+7,3 %** (p = 0,07) | +5,4 % (p = 0,69) | **0,909** |
-| LSTM (32×1, 2 ép.) | 6.499 | +0,5 % (p = 0,13) | +3,4 % (p = 0,05) | +4,3 % (p = 0,49) | 0,928 |
-| GRU (32×1, 3 ép.) | 4.899 | +0,8 % (p = 0,02) | +4,4 % (p = 0,08) | −8,0 % (p = 0,44) | 0,937 |
+| Red (config.) | Parámetros | Tiempo de entrenamiento | Mejora RMSE vs ingenuo: corto | medio | largo | Error CV |
+|---|---:|---:|---:|---:|---:|---:|
+| **RNN** (64×2, 2 ép.) — *en producción* | 13.763 | 11,7 s | **+1,2 %** (p = 0,01) | **+7,3 %** (p = 0,07) | +5,4 % (p = 0,69) | **0,909** |
+| LSTM (32×1, 2 ép.) | 6.499 | 3,3 s | +0,5 % (p = 0,13) | +3,4 % (p = 0,05) | +4,3 % (p = 0,49) | 0,928 |
+| GRU (32×1, 3 ép.) | 4.899 | 14,8 s | +0,8 % (p = 0,02) | +4,4 % (p = 0,08) | −8,0 % (p = 0,44) | 0,937 |
+
+Tiempo de entrenamiento del conjunto de 5 semillas en CPU. MAE y RMSE de cada red y horizonte, en [`reports/comparison.md`](reports/comparison.md).
 
 Por qué la RNN:
 
@@ -126,7 +130,7 @@ La RNN se entrenó solo con datos hasta el 31/12/2022 y se comparan sus predicci
 
 - **Dos R²**: el R² sobre el precio engaña con series tan autocorrelacionadas (copiar el precio de hoy ya da 0,86 a corto plazo, y a medio/largo plazo sale negativo para todos porque 2023–25 fue un rango estrecho seguido del salto de 2026). Por eso se reporta también el **R² fuera de muestra frente al ingenuo** (1 − MSE/MSE ingenuo; Campbell y Thompson, 2008), positivo en los tres horizontes.
 - **Cuándo acierta**: a medio plazo bate al ingenuo en todos los años (2023–2026) y en todos los regímenes de volatilidad; a corto plazo, con una mejora pequeña pero en todos los grupos.
-- **Cuándo falla**: los mayores errores coinciden con la crisis de Irán y Ormuz de 2026, donde el ingenuo falla lo mismo; a largo plazo, las predicciones hechas en 2023 fueron peores que el ingenuo (−69 %), y en 2024 mucho mejores (+44 %): la cifra a 12 meses no es fiable y la aplicación muestra el rango.
+- **Cuándo falla**: a corto y medio plazo, los mayores errores coinciden con la crisis de Irán y Ormuz de 2026, un shock que el ingenuo tampoco anticipa (falla casi lo mismo). A largo plazo sí hay errores propios del modelo: las predicciones hechas en 2023 y parte de 2024 anticipaban caídas que no llegaron (peor que el ingenuo en 2023, −69 %), mientras que las de 2024 en conjunto fueron mucho mejores (+44 %). La cifra a 12 meses no es fiable y la aplicación muestra el rango.
 - Gráficos de real frente a predicho y del error móvil frente al ingenuo: [`reports/figures/error_analysis.png`](reports/figures/error_analysis.png).
 
 ## Fuentes de datos
@@ -134,7 +138,9 @@ La RNN se entrenó solo con datos hasta el 31/12/2022 y se comparan sus predicci
 - **FRED** (<https://fred.stlouisfed.org>): Brent y WTI spot (EIA), gas natural Henry Hub, tipo de la facilidad de depósito del BCE, dólar/euro, yuan/dólar y VIX.
 - **Yahoo Finance** (<https://finance.yahoo.com>): futuros del Brent y del WTI, cobre, oro e índice del dólar.
 
-Todos los datos son diarios (días hábiles) y gratuitos, sin clave. La EIA publica el Brent spot con unos días de retraso.
+Todos los datos son diarios (días hábiles) y gratuitos, sin clave. La EIA publica el Brent spot con unos días de retraso: hasta que llega el dato nuevo, se repite el último valor disponible (como indica el enunciado para los huecos).
+
+La **cesta de la OPEP (ORB)** no se incluye: no está en FRED ni en Yahoo Finance y la OPEP solo la publica en su web, sin una descarga estable que una actualización diaria automática pueda usar. Además sigue muy de cerca al Brent, que ya es la variable objetivo, así que aportaría poca información nueva.
 
 ## Estructura del repositorio
 

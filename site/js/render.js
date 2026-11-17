@@ -34,7 +34,8 @@ export function renderHero(forecast, meta) {
   const chip = (id, value, abs) => {
     const el = $(id);
     el.classList.remove('is-up', 'is-down');
-    el.classList.add(dirClass(value));
+    const cls = dirClass(value);
+    if (cls) el.classList.add(cls); // variación 0 → sin clase (classList.add('') lanza una excepción)
     el.querySelector('.chip__value').textContent = abs !== undefined ? `${fmt.signed(abs)} · ${fmt.pct(value)}` : fmt.pct(value);
   };
   chip('#chip-day', c.day_pct, c.day_abs);

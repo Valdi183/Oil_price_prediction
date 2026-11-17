@@ -12,7 +12,7 @@ Caso de uso III de la asignatura *Aprendizaje automático* (UAX): comparar una *
 - Genera una **explicación en lenguaje sencillo**: qué significa la predicción, qué fiabilidad tiene en ese horizonte según la comparativa (sello de Diebold-Mariano incluido) y qué factores pueden invalidarla.
 - Marca en el gráfico los **picos y caídas del ciclo económico** (2008, 2014-2016, 2020, 2022, 2025-2026…) con una línea de tiempo navegable que hace zoom al periodo.
 - Presenta la **comparativa de las tres redes** frente al modelo ingenuo (tablas, barras, real vs predicho en test y test de significación) y justifica la elección.
-- Se **actualiza sola**: una GitHub Action descarga los datos recientes, reentrena el modelo y vuelve a publicar la web; el botón «Actualizar ahora» la lanza a mano.
+- Se **actualiza sola**: cada día una GitHub Action descarga los datos recientes y los pasa por el modelo ya entrenado (guardado en Hugging Face Hub), **sin reentrenar**, y vuelve a publicar la web. Reentrenar es una acción manual aparte; el botón «Actualizar ahora» lanza la Action.
 
 ## Arquitectura
 
@@ -37,6 +37,8 @@ Módulos de Python (`oilcast/`):
 | `models.py` | RNN / LSTM / GRU en PyTorch con el mismo bucle de entrenamiento (error Huber) |
 | `pipeline.py` | Particiones temporales, métricas, validación walk-forward, conjunto de semillas, modelo de producción y `forecast()` |
 | `explain.py` | Texto en lenguaje sencillo y nivel de fiabilidad por horizonte (métricas de test + p-valor de Diebold-Mariano) |
+| `evaluation.py` | Métricas fuera de muestra (MAE, MSE, RMSE, R²), errores por año y régimen, error móvil y peores fallos |
+| `hub.py` | Publicación y descarga del modelo en Hugging Face Hub, con su ficha |
 | `events.py` | Picos y caídas del ciclo económico localizados sobre la serie real y resumen de movimientos recientes |
 | `config.py` | Horizontes, folds de la validación cruzada, rejilla de hiperparámetros, intervalo del 80 % |
 
@@ -48,7 +50,9 @@ Scripts:
 | `scripts/train_compare.py` | Comparativa completa RNN vs LSTM vs GRU (60-70 min en CPU) → `reports/` y modelo de producción |
 | `scripts/significance.py` | Test de Diebold-Mariano y combinación de referencia → `reports/significance.*`, `reports/test_predictions.csv` |
 | `scripts/retrain.py` | Reentrena el modelo elegido con todos los datos (lee `models/production_meta.json` o, si no existe, `config/production_recipe.json`) |
-| `scripts/export_site.py` | Exporta los JSON de la web a `site/data/` |
+| `scripts/error_analysis.py` | MAE, MSE, RMSE, R² y análisis de cuándo acierta y cuándo falla (sin entrenar) → `reports/error_analysis.md`, `reports/figures/error_analysis.png` |
+| `scripts/model_hub.py` | Descarga (`download`) o publica (`upload`) el modelo de producción en Hugging Face Hub |
+| `scripts/export_site.py` | Exporta los JSON de la web a `site/data/` (solo inferencia con el modelo de `models/`) |
 
 ## Ejecutar en local
 
@@ -59,12 +63,14 @@ poetry install                                   # crea .venv/ en el proyecto
 poetry run python scripts/download_data.py       # datos recientes (FRED + Yahoo Finance)
 poetry run python scripts/train_compare.py       # opcional: comparativa completa (60-70 min)
 poetry run python scripts/significance.py        # opcional: Diebold-Mariano (reentrena las 3 redes en test)
+poetry run python scripts/error_analysis.py      # opcional: MAE/MSE/RMSE/R² y análisis de errores (sin entrenar)
 poetry run python scripts/retrain.py             # modelo de producción con la receta (~13 s)
+# o, sin entrenar: HF_MODEL_REPO=usuario/nombre poetry run python scripts/model_hub.py download
 poetry run python scripts/export_site.py         # JSON de la web → site/data/
 python -m http.server -d site                    # abre http://localhost:8000
 ```
 
-`models/` no se versiona (los modelos se publicarán en Hugging Face Hub); por eso `retrain.py` puede partir de la receta versionada `config/production_recipe.json` (arquitectura, hiperparámetros, épocas, cuantiles del intervalo y métricas de test de la comparativa).
+`models/` no se versiona (el modelo se publica en Hugging Face Hub con `scripts/model_hub.py`); por eso `retrain.py` puede partir de la receta versionada `config/production_recipe.json` (arquitectura, hiperparámetros, épocas, cuantiles del intervalo y métricas de test de la comparativa).
 
 Las curvas de entrenamiento se pueden seguir con `poetry run tensorboard --logdir runs`.
 
@@ -73,7 +79,18 @@ Las curvas de entrenamiento se pueden seguir con `poetry run tensorboard --logdi
 El flujo `.github/workflows/update-site.yml`:
 
 - se ejecuta **cada día laborable** (07:30 UTC), **a mano** (pestaña *Actions* → *Actualizar predicción y desplegar la web* → *Run workflow*; es el enlace del botón «Actualizar ahora» de la web) y al hacer push en `main` de ficheros que afecten a la web o al pipeline;
-- cachea `.venv` por el hash de `poetry.lock`, descarga los datos (si una fuente falla, sigue con la instantánea de `data/`), reentrena, exporta y despliega `site/` con `actions/upload-pages-artifact` + `actions/deploy-pages`.
+- **incorporar datos y reentrenar son procesos distintos**:
+  - **actualización (por defecto, diaria)**: descarga los datos nuevos (si una fuente falla, sigue con la instantánea de `data/`) y el modelo ya entrenado desde **Hugging Face Hub**, y el último dato pasa por el modelo. **No se entrena nada**;
+  - **reentrenamiento (solo a mano)**: *Run workflow* marcando *Reentrenar*. Entrena el conjunto con todos los datos (~13 s en CPU) y publica la nueva versión en el Hub, que pasa a ser la que usan las actualizaciones diarias;
+- cachea `.venv` por el hash de `poetry.lock`, exporta los JSON y despliega `site/` con `actions/upload-pages-artifact` + `actions/deploy-pages`.
+
+Configuración del modelo en Hugging Face (una vez):
+
+1. Crea un token de escritura en <https://huggingface.co/settings/tokens>.
+2. En GitHub: **Settings → Secrets and variables → Actions** → *Variables*: `HF_MODEL_REPO` = `usuario/nombre-del-modelo`; *Secrets*: `HF_TOKEN` = el token.
+3. Publica el modelo actual (desde local, con `models/` entrenado): `HF_MODEL_REPO=usuario/nombre HF_TOKEN=... poetry run python scripts/model_hub.py upload`, o lanza la Action con *Reentrenar*.
+
+Si el Hub aún no tiene modelo, la Action entrena uno temporal como respaldo para que la web no se rompa (y lo avisa).
 
 Para activarlo en un fork: **Settings → Pages → Build and deployment → Source: GitHub Actions**. La URL será `https://<usuario>.github.io/<repo>/` (la web deduce el repositorio de `git remote` o de `GITHUB_REPOSITORY`).
 
@@ -93,9 +110,24 @@ Por qué la RNN:
 2. **La única red que bate al ingenuo con p = 0,01 a corto plazo** (Diebold-Mariano): mejora pequeña pero demostrada → orientación de tendencia.
 3. **La mejor a medio plazo** (+7,3 %, 62 % de acierto en la dirección): es donde el modelo aporta valor.
 4. **A largo plazo ninguna red es fiable** (p ≥ 0,44 y una dispersión entre semillas enorme): la aplicación atenúa la cifra y destaca el rango del 80 %.
-5. Coste contenido: 13,8k parámetros y ~13 s de reentrenamiento en CPU, lo que permite reentrenar a diario.
+5. Coste contenido: 13,8k parámetros y ~13 s de reentrenamiento en CPU. En el día a día no se reentrena: los datos nuevos pasan por el modelo ya entrenado.
 
 La combinación de las tres redes (media) se calcula solo como referencia: no se integra en la aplicación porque el enunciado pide integrar un único modelo.
+
+## Validación fuera de muestra: ¿funciona el modelo?
+
+La RNN se entrenó solo con datos hasta el 31/12/2022 y se comparan sus predicciones con los precios reales que hubo después (2023 → hoy, ~1.000 días). Detalle en [`reports/error_analysis.md`](reports/error_analysis.md) y en la sección *Validación* de la web.
+
+| Horizonte | MAE ($) | MSE | RMSE ($) | R² precio (ingenuo) | R² fuera de muestra vs ingenuo |
+|---|---:|---:|---:|---:|---:|
+| Corto (5 d) | 3,63 | 28,92 | 5,38 | 0,862 (0,858) | **+2,3 %** |
+| Medio (63 d) | 10,71 | 277,11 | 16,65 | −0,256 (−0,461) | **+14,1 %** |
+| Largo (252 d) | 14,70 | 423,37 | 20,58 | −0,602 (−0,788) | **+10,4 %** |
+
+- **Dos R²**: el R² sobre el precio engaña con series tan autocorrelacionadas (copiar el precio de hoy ya da 0,86 a corto plazo, y a medio/largo plazo sale negativo para todos porque 2023–25 fue un rango estrecho seguido del salto de 2026). Por eso se reporta también el **R² fuera de muestra frente al ingenuo** (1 − MSE/MSE ingenuo; Campbell y Thompson, 2008), positivo en los tres horizontes.
+- **Cuándo acierta**: a medio plazo bate al ingenuo en todos los años (2023–2026) y en todos los regímenes de volatilidad; a corto plazo, con una mejora pequeña pero en todos los grupos.
+- **Cuándo falla**: los mayores errores coinciden con la crisis de Irán y Ormuz de 2026, donde el ingenuo falla lo mismo; a largo plazo, las predicciones hechas en 2023 fueron peores que el ingenuo (−69 %), y en 2024 mucho mejores (+44 %): la cifra a 12 meses no es fiable y la aplicación muestra el rango.
+- Gráficos de real frente a predicho y del error móvil frente al ingenuo: [`reports/figures/error_analysis.png`](reports/figures/error_analysis.png).
 
 ## Fuentes de datos
 
@@ -107,7 +139,7 @@ Todos los datos son diarios (días hábiles) y gratuitos, sin clave. La EIA publ
 ## Estructura del repositorio
 
 ```
-.github/workflows/update-site.yml   Action: datos → reentrenar → exportar → Pages
+.github/workflows/update-site.yml   Action: datos → modelo del Hub (o reentrenar a mano) → exportar → Pages
 config/production_recipe.json       receta del modelo de producción (versionada)
 data/petroleo_dataset.csv           instantánea del dataset
 docs/assignment/ENUNCIADO.pdf       enunciado del caso de uso

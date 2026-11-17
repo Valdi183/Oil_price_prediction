@@ -93,7 +93,7 @@ export function markSelectedCard(selected) {
     el.setAttribute('aria-pressed', on ? 'true' : 'false');
   });
   document.querySelectorAll('#horizon-segmented button').forEach((b) => b.setAttribute('aria-selected', b.dataset.horizon === selected ? 'true' : 'false'));
-  document.querySelectorAll('#test-segmented button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.horizon === selected ? 'true' : 'false'));
+  document.querySelectorAll('#test-segmented button, #val-segmented button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.horizon === selected ? 'true' : 'false'));
 }
 
 // ------------------------------------------------------------------ explicación
@@ -112,6 +112,8 @@ export function renderExplanation(forecast, horizon) {
     ['Error medio del modelo (MAE)', fmt.price(m.MAE)],
     ['Error medio del ingenuo (MAE)', fmt.price(m.MAE_ingenuo)],
     ['RMSE modelo / ingenuo', `${fmt.num(m.RMSE)} / ${fmt.num(m.RMSE_ingenuo)}`],
+    ['MSE del modelo', fmt.num(m.MSE)],
+    ['R² fuera de muestra vs ingenuo', `<span class="${dirClass(m['R2_OOS_%'])}">${fmt.pct(m['R2_OOS_%'])}</span>`],
     ['Mejora del RMSE', `<span class="${dirClass(m['mejora_RMSE_%'])}">${fmt.pct(m['mejora_RMSE_%'])}</span>`],
     ['Acierto de la dirección', fmt.pct(m['acierto_direccion_%'], 0, false)],
     ['Predicciones evaluadas', fmt.int(m.n)],
@@ -206,7 +208,7 @@ export function renderWhy(models, forecast) {
     `<strong>${onlyOnePct ? 'La única red' : 'Una de las redes'} que bate al ingenuo con ${pValue(sel.p_vs_ingenuo.corto)} a corto plazo</strong> (test de Diebold-Mariano). La mejora es pequeña (${fmt.pct(sel.mejora.corto)}) pero demostrada: sirve como orientación de tendencia.`,
     `<strong>La mejor a medio plazo</strong>: ${fmt.pct(sel.mejora.medio)} de mejora del RMSE frente al ingenuo (${medioList}) y acierta la dirección el ${fmt.pct(forecast.horizons.medio.metrics['acierto_direccion_%'], 0, false)} de las veces. Es donde el modelo aporta valor.`,
     `<strong>A largo plazo ninguna red es fiable</strong>: ${largoP}. Con solo 3–4 años no solapados el test no puede distinguirlas, y la dispersión entre semillas es enorme (±${fmt.num(sel.std_mejora.largo, 0)} % en la RNN). Por eso a 12 meses la aplicación destaca el rango y atenúa la cifra.`,
-    `<strong>Coste contenido</strong>: ${fmt.int(sel.parametros)} parámetros por red y unos ${fmt.num(sel.tiempo_entrenamiento_s, 0)} s de reentrenamiento del conjunto en CPU, lo que permite reentrenar a diario en GitHub Actions.`,
+    `<strong>Coste contenido</strong>: ${fmt.int(sel.parametros)} parámetros por red y unos ${fmt.num(sel.tiempo_entrenamiento_s, 0)} s de reentrenamiento del conjunto en CPU. En el día a día no hace falta: los datos nuevos pasan por el modelo ya entrenado y solo se reentrena cuando se decide.`,
   ];
   $('#why-list').innerHTML = items.map((t) => `<li>${t}</li>`).join('');
 }
@@ -227,13 +229,14 @@ export function renderSeals(models) {
 }
 
 export function renderTables(models) {
-  const head = ['Red', 'Horizonte', 'MAE', 'RMSE', 'MAE ingenuo', 'RMSE ingenuo', 'Mejora RMSE', '± semillas', 'Acierto dir.', 'Cobertura 80 %', 'Parámetros', 'Épocas', 'Tiempo', 'Error CV'];
+  const head = ['Red', 'Horizonte', 'MAE', 'MSE', 'RMSE', 'R² precio', 'R² vs ingenuo', 'MAE ingenuo', 'RMSE ingenuo', 'Mejora RMSE', '± semillas', 'Acierto dir.', 'Cobertura 80 %', 'Parámetros', 'Épocas', 'Tiempo', 'Error CV'];
   const body = models.comparison.map((r) => {
     const cls = r.reference ? 'is-ref' : r.selected ? 'is-selected' : '';
     const pill = r.reference ? '<span class="pill">solo referencia</span>' : r.selected && r.horizonte === 'corto' ? '<span class="pill pill--accent">producción</span>' : '';
     return `<tr class="${cls}">
       <td>${r.red}${pill}</td><td>${r.horizonte} (${r.dias} d)</td>
-      <td>${fmt.num(r.MAE)}</td><td>${fmt.num(r.RMSE)}</td><td>${fmt.num(r.MAE_ingenuo)}</td><td>${fmt.num(r.RMSE_ingenuo)}</td>
+      <td>${fmt.num(r.MAE)}</td><td>${fmt.num(r.MSE)}</td><td>${fmt.num(r.RMSE)}</td>
+      <td>${fmt.num(r.R2_precio, 3)}</td><td class="${dirClass(r['R2_OOS_%'])}">${fmt.pct(r['R2_OOS_%'])}</td><td>${fmt.num(r.MAE_ingenuo)}</td><td>${fmt.num(r.RMSE_ingenuo)}</td>
       <td class="${dirClass(r['mejora_RMSE_%'])}">${fmt.pct(r['mejora_RMSE_%'])}</td>
       <td>${r['std_mejora_RMSE_%'] != null ? `±${fmt.num(r['std_mejora_RMSE_%'], 1)}` : '—'}</td>
       <td>${fmt.pct(r['acierto_direccion_%'], 1, false)}</td>
@@ -253,6 +256,59 @@ export function renderTables(models) {
   $('#test-title').textContent = `Periodo de test: ${fmt.date(models.test_period.start)} → ${fmt.date(models.test_period.end)}`;
 }
 
+// ------------------------------------------------------------------ validación fuera de muestra
+const HZ = { corto: 'Corto plazo', medio: 'Medio plazo', largo: 'Largo plazo' };
+const HZ_DAYS = { corto: 5, medio: 63, largo: 252 };
+
+export function renderValidationStatic(models) {
+  const v = models.validation;
+  const get = (model, hz) => v.metrics.find((r) => r.modelo === model && r.horizonte === hz);
+  const kv = (k, val, cls = '', sub = '') => `<div><div class="vbox__k">${k}</div><div class="vbox__v ${cls}">${val}${sub ? `<small>${sub}</small>` : ''}</div></div>`;
+  $('#val-strip').innerHTML = ['corto', 'medio', 'largo'].map((hz) => {
+    const r = get(models.selected, hz), n = get('Ingenuo', hz);
+    return `<div class="vbox"><div class="vbox__h">${HZ[hz]}<small>${HZ_DAYS[hz]} días · ${fmt.int(r.n)} predicciones</small></div><div class="vbox__grid">
+      ${kv('MAE', fmt.price(r.MAE), '', `ingenuo ${fmt.num(n.MAE)}`)}
+      ${kv('RMSE', fmt.price(r.RMSE), '', `ingenuo ${fmt.num(n.RMSE)}`)}
+      ${kv('MSE', fmt.num(r.MSE), '', `ingenuo ${fmt.num(n.MSE)}`)}
+      ${kv('R² precio', fmt.num(r.R2_precio, 3), '', `ingenuo ${fmt.num(n.R2_precio, 3)}`)}
+      ${kv('R² vs ingenuo', fmt.pct(r['R2_OOS_%']), dirClass(r['R2_OOS_%']))}
+      ${kv('Acierto dirección', fmt.pct(r['acierto_direccion_%'], 0, false))}
+    </div></div>`;
+  }).join('');
+
+  const hzs = ['corto', 'medio', 'largo'];
+  const cell = (tipo, g, hz) => {
+    const r = v.periods.find((x) => x.tipo === tipo && x.grupo === g && x.horizonte === hz);
+    if (!r) return '<td class="muted">—</td>';
+    const val = r['mejora_RMSE_%'];
+    const heat = Math.min(40, 6 + Math.abs(val) * 1.2).toFixed(0);
+    return `<td class="${dirClass(val)} heat--${val >= 0 ? 'up' : 'down'}" style="--heat:${heat}%" title="RMSE RNN ${fmt.price(r.RMSE)} · ingenuo ${fmt.price(r.RMSE_ingenuo)} · ${fmt.int(r.n)} predicciones">${fmt.pct(val)}</td>`;
+  };
+  const rows = [
+    '<tr class="group-row"><td colspan="4">Por año de origen</td></tr>',
+    ...v.years.map((y) => `<tr><td>${y}</td>${hzs.map((hz) => cell('año', y, hz)).join('')}</tr>`),
+    '<tr class="group-row"><td colspan="4">Por volatilidad del mercado</td></tr>',
+    ...v.regimes.map((g) => `<tr><td>${g}</td>${hzs.map((hz) => cell('régimen', g, hz)).join('')}</tr>`),
+  ];
+  $('#period-table').innerHTML = `<thead><tr><th>Grupo</th><th>Corto</th><th>Medio</th><th>Largo</th></tr></thead><tbody>${rows.join('')}</tbody>`;
+  const [q1, q2] = v.regime_thresholds;
+  $('#period-note').textContent = `Positivo = la RNN se equivoca menos que el ingenuo. Régimen según la volatilidad del Brent a 20 días el día de la predicción (anualizada): calma ≤ ${fmt.num(q1, 0)} %, normal ${fmt.num(q1, 0)}–${fmt.num(q2, 0)} %, turbulencia > ${fmt.num(q2, 0)} %. A largo plazo, las predicciones hechas en 2026 aún no tienen valor real.`;
+}
+
+const sgn = (x) => `${x > 0 ? '+' : ''}${fmt.num(x)}`;
+
+export function renderValidationHorizon(models, horizon) {
+  const v = models.validation;
+  const roll = v.rolling[horizon];
+  $('#val-roll-title').textContent = `${HZ[horizon]}: ¿cuándo bate al ingenuo?`;
+  $('#val-roll-note').textContent = `Cociente entre el RMSE de la RNN y el del ingenuo en una ventana móvil de ${roll.window} días. Por debajo de 1 (verde) la RNN se equivoca menos; lo consigue el ${fmt.num(roll.beats_pct, 0)} % del periodo de test.`;
+  $('#worst-title').textContent = `Los 5 mayores errores · ${HZ[horizon].toLowerCase()}`;
+  const rows = v.worst.filter((r) => r.horizonte === horizon).map((r) => `<tr>
+      <td>${fmt.date(r.fecha_origen)}</td><td>${fmt.num(r.real)}</td><td>${fmt.num(r.prediccion)}</td>
+      <td class="is-down">${sgn(r.error)}</td><td>${sgn(r.error_ingenuo)}</td></tr>`).join('');
+  $('#worst-table').innerHTML = `<thead><tr><th>Origen</th><th>Real</th><th>Pred.</th><th>Error RNN</th><th>Err. ingenuo</th></tr></thead><tbody>${rows}</tbody>`;
+}
+
 // ------------------------------------------------------------------ cómo funciona y pie
 export function renderMeta(meta) {
   const set = (k, v) => { const el = document.querySelector(`[data-stat="${k}"]`); if (el) el.textContent = v; };
@@ -264,6 +320,7 @@ export function renderMeta(meta) {
   $('#pipe-arch').textContent = `${meta.arch_label} × ${meta.n_members} semillas`;
   $('#update-meta').innerHTML = [
     ['Datos hasta', fmt.date(meta.data_until)],
+    ['Modelo entrenado con datos hasta', fmt.date(meta.model_data_until)],
     ['Último reentrenamiento', fmt.dateTime(meta.trained_at)],
     ['Web generada', meta.generated_at],
     ['Modelo', `${meta.arch_label} · ${meta.n_members} semillas · ${meta.n_epochs} épocas · error ${meta.loss}`],

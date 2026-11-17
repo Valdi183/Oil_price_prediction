@@ -343,3 +343,42 @@ export function testOption(models, horizon, pal) {
     series,
   };
 }
+
+// ------------------------------------------------------------------ error móvil frente al ingenuo
+export function rollingOption(models, horizon, pal) {
+  const dates = models.test_predictions.dates;
+  const r = models.validation.rolling[horizon];
+  const data = dates.map((d, i) => [d, r.ratio[i]]).filter((p) => p[1] !== null);
+  // Degradado vertical: rojo por encima de 1 (peor que el ingenuo) y verde por debajo.
+  const ys = data.map((p) => p[1]);
+  const ymax = Math.ceil(Math.max(...ys, 1) * 20) / 20, ymin = Math.floor(Math.min(...ys, 1) * 20) / 20;
+  const cut = ymax === ymin ? 0.5 : (ymax - 1) / (ymax - ymin);
+  const grad = (a) => new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+    { offset: 0, color: hexToRgba(pal.down, a) }, { offset: cut, color: hexToRgba(pal.down, a) },
+    { offset: cut, color: hexToRgba(pal.up, a) }, { offset: 1, color: hexToRgba(pal.up, a) }]);
+  return {
+    animation: !prefersReducedMotion(), animationDuration: 800,
+    grid: { left: 8, right: 16, top: 16, bottom: 8, containLabel: true },
+    tooltip: {
+      ...tooltipBase(pal), trigger: 'axis',
+      formatter: (params) => {
+        const p = params.find((x) => x.seriesIndex === 0);
+        if (!p || p.value[1] === null) return '';
+        const ok = p.value[1] < 1;
+        return `<div class="bf-tip"><div class="bf-tip__date">Ventana hasta ${fmt.date(isoLocal(p.axisValue))}</div>`
+          + row(ok ? pal.up : pal.down, 'RMSE RNN / ingenuo', fmt.num(p.value[1], 3))
+          + `<div class="bf-tip__row"><span>La RNN se equivoca un</span><b>${fmt.pct(Math.abs(100 * (p.value[1] - 1)), 1, false)} ${ok ? 'menos' : 'más'}</b></div></div>`;
+      },
+    },
+    xAxis: { type: 'time', ...axisBase(pal), splitLine: { show: false } },
+    yAxis: { type: 'value', min: ymin, max: ymax, ...axisBase(pal), axisLine: { show: false }, axisLabel: { ...axisBase(pal).axisLabel, formatter: (v) => fmt.num(v, 2) } },
+    series: [{
+      name: 'RMSE RNN / ingenuo', type: 'line', data, showSymbol: false,
+      lineStyle: { width: 2, color: grad(1) }, itemStyle: { color: pal.accent },
+      areaStyle: { color: grad(0.14), origin: 'start' },
+    }, {
+      name: 'Ingenuo = 1', type: 'line', data: [[dates[0], 1], [dates[dates.length - 1], 1]], showSymbol: false, silent: true,
+      lineStyle: { color: pal.muted, type: 'dashed', width: 1 }, tooltip: { show: false },
+    }],
+  };
+}

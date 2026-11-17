@@ -43,6 +43,7 @@
       <a href="#prediccion">Predicción</a>
       <a href="#ciclo">Ciclo económico</a>
       <a href="#modelos">Comparativa</a>
+      <a href="#validacion">Validación</a>
       <a href="#como-funciona">Cómo funciona</a>
     </nav>
     <div class="nav__actions">
@@ -255,13 +256,77 @@
     </div>
   </section>
 
+  <!-- ============================================================ VALIDACIÓN -->
+  <section class="section" id="validacion">
+    <div class="container">
+      <div class="section__head" data-reveal>
+        <span class="eyebrow">Validación fuera de muestra</span>
+        <h2 class="h2">¿Funciona el modelo? Cuándo acierta y cuándo se equivoca</h2>
+        <p class="lead">La RNN se entrenó solo con datos hasta el 31/12/2022. Desde entonces se compara cada predicción con el precio que hubo realmente después, sin que el modelo lo viera nunca. Todas las cifras están en $/barril y se comparan con el modelo ingenuo «el precio futuro es el de hoy».</p>
+      </div>
+
+      <div class="card" data-reveal>
+        <div class="card__head">
+          <div>
+            <span class="eyebrow">Métricas de la RNN en test</span>
+            <h3 class="h3">MAE, MSE, RMSE y R² por horizonte</h3>
+          </div>
+        </div>
+        <div class="vstrip" id="val-strip"></div>
+        <details class="details">
+          <summary>¿Por qué dos R²?</summary>
+          <p class="small muted"><strong>R² sobre el precio</strong> (1 − SSE/SST): con un precio tan dependiente del de ayer, copiar el precio de hoy ya «explica» casi todo a corto plazo, por eso el modelo ingenuo también saca un R² alto; y a medio y largo plazo sale negativo para todos los modelos porque en 2023–2025 el precio se movió en un rango estrecho y en 2026 dio un salto. <strong>R² fuera de muestra frente al ingenuo</strong> (1 − MSE/MSE ingenuo, Campbell y Thompson, 2008) es la métrica habitual en predicción financiera: mide qué parte del error cuadrático del ingenuo elimina el modelo. Positivo = el modelo aporta.</p>
+        </details>
+      </div>
+
+      <div class="card" data-reveal>
+        <div class="card__head">
+          <div>
+            <span class="eyebrow">Error móvil frente al ingenuo</span>
+            <h3 class="h3" id="val-roll-title">¿Cuándo bate al ingenuo?</h3>
+          </div>
+          <div class="segmented segmented--small" id="val-segmented" role="group" aria-label="Horizonte del análisis de errores">
+            <button type="button" data-horizon="corto" aria-pressed="true">Corto</button>
+            <button type="button" data-horizon="medio">Medio</button>
+            <button type="button" data-horizon="largo">Largo</button>
+          </div>
+        </div>
+        <div class="chart chart--test" id="roll-chart" role="img" aria-label="Cociente entre el error de la RNN y el del modelo ingenuo en una ventana móvil"></div>
+        <p class="small muted" id="val-roll-note"></p>
+      </div>
+
+      <div class="models-grid">
+        <div class="card" data-reveal>
+          <div class="card__head">
+            <div>
+              <span class="eyebrow">Por año y por régimen de mercado</span>
+              <h3 class="h3">Mejora del RMSE de la RNN frente al ingenuo</h3>
+            </div>
+          </div>
+          <div class="table-wrap"><table class="table table--compact" id="period-table"></table></div>
+          <p class="small muted" id="period-note"></p>
+        </div>
+        <div class="card" data-reveal>
+          <div class="card__head">
+            <div>
+              <span class="eyebrow">Peores fallos</span>
+              <h3 class="h3" id="worst-title">Los 5 mayores errores</h3>
+            </div>
+          </div>
+          <div class="table-wrap"><table class="table table--compact" id="worst-table"></table></div>
+          <p class="small muted">Error = predicción − real ($/barril), episodios distintos. Compáralo con el error del ingenuo: cuando los dos fallan casi igual, el fallo se debe a un shock que ningún modelo basado en el pasado podía anticipar (la mayoría, en la crisis de Irán y Ormuz de 2026); cuando la RNN falla más, es un error propio del modelo.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ============================================================ CÓMO FUNCIONA -->
   <section class="section" id="como-funciona">
     <div class="container">
       <div class="section__head" data-reveal>
         <span class="eyebrow">Cómo funciona</span>
         <h2 class="h2">Todo el cálculo lo hace Python; esta web solo lo muestra</h2>
-        <p class="lead">Un flujo de trabajo de GitHub Actions descarga los datos, reentrena la red, calcula las predicciones, los intervalos y las explicaciones, y publica el resultado como ficheros JSON en esta página. Ninguna cifra está escrita a mano.</p>
+        <p class="lead">Un flujo de trabajo de GitHub Actions descarga los datos, pasa el último dato por la red ya entrenada (publicada en Hugging Face), calcula las predicciones, los intervalos y las explicaciones, y publica el resultado como ficheros JSON en esta página. Ninguna cifra está escrita a mano.</p>
       </div>
 
       <div class="pipeline" data-reveal id="pipeline">
@@ -288,8 +353,8 @@
       <div class="card card--update" data-reveal>
         <div>
           <span class="eyebrow">Actualización dinámica</span>
-          <h3 class="h3">Datos y modelo al día</h3>
-          <p class="muted">La Action se ejecuta cada día laborable y también a mano. Descarga los datos recientes, reentrena el modelo de producción con todos los datos y vuelve a publicar esta web.</p>
+          <h3 class="h3">Datos nuevos cada día, reentrenamiento solo cuando hace falta</h3>
+          <p class="muted">Incorporar datos y reentrenar son procesos distintos. Cada día laborable la Action descarga las nuevas observaciones y las pasa por el modelo ya entrenado, que se guarda en Hugging Face Hub: no se entrena nada. Reentrenar es una acción manual que entrena el conjunto con todos los datos (unos segundos en CPU) y publica la nueva versión del modelo.</p>
           <dl class="kv kv--inline" id="update-meta"></dl>
         </div>
         <div class="card--update__cta">
@@ -297,7 +362,7 @@
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
             <span>Actualizar ahora</span>
           </a>
-          <p class="small muted">Abre la página de la Action en GitHub: «Run workflow» lanza la descarga, el reentrenamiento y el despliegue.</p>
+          <p class="small muted">Abre la página de la Action en GitHub: «Run workflow» actualiza los datos y la predicción; marcando «Reentrenar» también entrena y publica un modelo nuevo.</p>
         </div>
       </div>
     </div>

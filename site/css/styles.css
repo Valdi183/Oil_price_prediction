@@ -449,6 +449,25 @@ button { font: inherit; color: inherit; }
 .bf-tip__ev p { margin: 0; color: var(--text-2); font-size: 0.78rem; line-height: 1.4; }
 .bf-tip__cycle { display: inline-block; margin: 4px 0 6px; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); font-weight: 700; }
 
+
+/* ------------------------------------------------------------------ validación */
+.vstrip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.vbox { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; background: var(--bg-2); }
+.vbox__h { font-weight: 800; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.vbox__h small { font-weight: 500; color: var(--muted); font-size: 0.72rem; }
+.vbox__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; }
+.vbox__k { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.vbox__v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600; }
+.vbox__v small { display: block; color: var(--muted); font-weight: 400; font-size: 0.72rem; }
+.vbox__v.is-up { color: var(--up); }
+.vbox__v.is-down { color: var(--down); }
+.table--compact { min-width: 0; }
+.table--compact th, .table--compact td { padding: 7px 10px; }
+.table .heat { border-radius: 6px; }
+.table td.heat--up { background: color-mix(in srgb, var(--up) var(--heat, 12%), transparent); }
+.table td.heat--down { background: color-mix(in srgb, var(--down) var(--heat, 12%), transparent); }
+.table tr.group-row td { font-family: var(--font-ui); font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); background: var(--bg-2); font-weight: 600; }
+
 /* ------------------------------------------------------------------ responsive */
 @media (max-width: 1024px) {
   .nav__notice { display: none; }
@@ -459,7 +478,7 @@ button { font: inherit; color: inherit; }
 }
 @media (max-width: 860px) {
   .hero__grid, .explain-grid, .models-grid, .card--update { grid-template-columns: 1fr; }
-  .horizon-cards, .model-cards { grid-template-columns: 1fr; }
+  .horizon-cards, .model-cards, .vstrip { grid-template-columns: 1fr; }
   .stats { grid-template-columns: 1fr 1fr; }
   .chart--main { height: 380px; }
   .nav__links { display: none; }
@@ -481,6 +500,7 @@ button { font: inherit; color: inherit; }
   .pipe-arrow { display: none; }
   .stats { grid-template-columns: 1fr 1fr; }
   .seals { grid-template-columns: 1fr; }
+  .vstrip { grid-template-columns: 1fr; }
   .footer__grid { grid-template-columns: 1fr; }
   .tl-card { flex-basis: 84vw; }
   .timeline__nav { display: none; }

@@ -1,7 +1,7 @@
 // Punto de entrada: carga los JSON, mantiene el estado y conecta los controles.
 import { fmt, localMs, shiftMonths, prefersReducedMotion } from './format.js';
 import { initTheme, palette } from './theme.js';
-import { sparklineOption, mainChartOption, barsOption, testOption } from './charts.js';
+import { sparklineOption, mainChartOption, barsOption, testOption, rollingOption } from './charts.js';
 import * as R from './render.js';
 
 const HLABEL = { corto: 'Corto plazo', medio: 'Medio plazo', largo: 'Largo plazo' };
@@ -37,6 +37,7 @@ function renderCharts() {
   }), { replaceMerge: ['series'] });
   charts.bars.setOption(barsOption(data.models, pal), { notMerge: true });
   charts.test.setOption(testOption(data.models, state.horizon, pal), { notMerge: true });
+  charts.roll.setOption(rollingOption(data.models, state.horizon, pal), { notMerge: true });
 }
 
 function updateHorizon(h) {
@@ -47,6 +48,7 @@ function updateHorizon(h) {
   R.markSelectedCard(h);
   R.markSelectedEvent(null);
   R.renderExplanation(data.forecast, h);
+  R.renderValidationHorizon(data.models, h);
   R.renderLegend(state.layers, HLABEL[h]);
   syncRangeButtons();
   renderCharts();
@@ -83,6 +85,10 @@ function selectEvent(id, { scrollChart = true, scrollCard = false } = {}) {
 
 function bindControls() {
   document.getElementById('horizon-segmented').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-horizon]');
+    if (b) updateHorizon(b.dataset.horizon);
+  });
+  document.getElementById('val-segmented').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-horizon]');
     if (b) updateHorizon(b.dataset.horizon);
   });
@@ -187,6 +193,8 @@ async function main() {
   R.renderWhy(data.models, data.forecast);
   R.renderSeals(data.models);
   R.renderTables(data.models);
+  R.renderValidationStatic(data.models);
+  R.renderValidationHorizon(data.models, state.horizon);
   R.renderMeta(data.meta);
   R.markSelectedCard(state.horizon);
 
@@ -195,10 +203,11 @@ async function main() {
     charts.main = initChart('main-chart');
     charts.bars = initChart('bars-chart');
     charts.test = initChart('test-chart');
+    charts.roll = initChart('roll-chart');
     renderCharts();
   } else {
     charts.main = { on() {}, setOption() {}, resize() {} };
-    charts.spark = charts.bars = charts.test = charts.main;
+    charts.spark = charts.bars = charts.test = charts.roll = charts.main;
   }
   bindControls();
   syncRangeButtons();

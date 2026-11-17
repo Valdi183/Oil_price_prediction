@@ -35,6 +35,8 @@ sys.path.insert(0, str(ROOT))
 from oilcast.config import (CV_FOLDS, HORIZONS, INTERVAL_HIGH_Q, INTERVAL_LOW_Q, REPORTS_DIR,  # noqa: E402
                             TEST_START, WINDOW)
 from oilcast.data import clean, load_raw  # noqa: E402
+from oilcast.evaluation import (REGIMES, by_group, full_metrics, load_test_predictions, regimes,  # noqa: E402
+                                rolling_ratio, worst_errors)
 from oilcast.events import locate_events, recent_movements  # noqa: E402
 from oilcast.explain import explain, reliability  # noqa: E402
 from oilcast.pipeline import Dataset, forecast, load_production  # noqa: E402
@@ -54,7 +56,7 @@ ARCHS = ["RNN", "LSTM", "GRU"]
 
 # ----------------------------------------------------------------------------- utilidades
 # Campos que necesitan más de 2 decimales (p-valores, scores de CV, learning rate)
-PRECISION = {"lr": 4, "p_valor": 6, "p_vs_ingenuo": 6, "score": 3, "score_cv": 3, "std_cv_folds": 3, "std_cv_semillas": 3}
+PRECISION = {"R2_precio": 3, "lr": 4, "p_valor": 6, "p_vs_ingenuo": 6, "score": 3, "score_cv": 3, "std_cv_folds": 3, "std_cv_semillas": 3}
 
 
 def rnd(x, nd: int = 2):
@@ -110,7 +112,12 @@ def export_forecast(ds: Dataset, meta: dict, sig: pd.DataFrame) -> dict:
     fc = forecast(ds, load_production())
     brent = ds.df["brent"]
     p0, last_date = fc["last_price"], fc["last_date"]
-    metrics = {m["horizonte"]: m for m in meta["test_metrics"]}
+    metrics = {m["horizonte"]: dict(m) for m in meta["test_metrics"]}
+    full = full_metrics(load_test_predictions()).set_index(["modelo", "horizonte"])
+    for name, m in metrics.items():          # añade MSE y R² del modelo de producción
+        if (meta["arch"], name) in full.index:
+            f = full.loc[(meta["arch"], name)]
+            m.update({"R2_precio": float(f["R2_precio"]), "R2_OOS_%": float(f["R2_OOS_%"])})
     vix = float(ds.df["vix"].iloc[-1])
 
     horizons = {}
@@ -181,7 +188,7 @@ def _direction_acc(p0: np.ndarray, pred: np.ndarray, real: np.ndarray) -> float:
     return 100 * float(np.mean(np.sign(pred[moved] - p0[moved]) == np.sign(real[moved] - p0[moved])))
 
 
-def export_models(meta: dict, sig: pd.DataFrame) -> None:
+def export_models(meta: dict, sig: pd.DataFrame, ds_brent: pd.Series) -> None:
     comp = pd.read_csv(REPORTS_DIR / "comparison.csv")
     equal = pd.read_csv(REPORTS_DIR / "comparison_equal_size.csv")
     cv = pd.read_csv(REPORTS_DIR / "cv_results.csv")
@@ -215,6 +222,12 @@ def export_models(meta: dict, sig: pd.DataFrame) -> None:
             "tiempo_entrenamiento_s": float(nets["tiempo_entrenamiento_s"].sum()),
             "hiperparametros": "media de las tres redes", "reference": True, "selected": False,
         })
+
+    # MSE y R² (sobre el precio y fuera de muestra frente al ingenuo) de oilcast.evaluation
+    full = full_metrics(tp).set_index(["modelo", "horizonte"])
+    for r in rows:
+        f = full.loc[(r["red"], r["horizonte"])]
+        r.update({"MSE": float(f["MSE"]), "R2_precio": float(f["R2_precio"]), "R2_OOS_%": float(f["R2_OOS_%"])})
 
     models = []
     for arch in ARCHS:
@@ -259,8 +272,31 @@ def export_models(meta: dict, sig: pd.DataFrame) -> None:
         "equal_size": rnd(equal.to_dict("records")),
         "significance": rnd(sig_rows),
         "test_predictions": preds,
+        "validation": validation_block(tp, full, ds_brent),
     }
     dump("models.json", out)
+
+
+def validation_block(tp: pd.DataFrame, full: pd.DataFrame, brent: pd.Series) -> dict:
+    """Validación fuera de muestra de la RNN: métricas completas (incluido el ingenuo), errores
+    por año y por régimen de volatilidad, cociente de RMSE móvil frente al ingenuo y peores fallos."""
+    years = tp["fecha_origen"].dt.year.astype(str)
+    reg, (q1, q2), _ = regimes(tp, brent)
+    periods = pd.concat([by_group(tp, years, "año"), by_group(tp, reg, "régimen")], ignore_index=True)
+    roll = rolling_ratio(tp)
+    worst = worst_errors(tp)
+    worst["fecha_origen"] = worst["fecha_origen"].astype(str)
+    worst["fecha_objetivo"] = worst["fecha_objetivo"].astype(str)
+    beats = {hz: 100 * float(np.mean(r["ratio"][~np.isnan(r["ratio"])] < 1)) for hz, r in roll.items()}
+    return {
+        "metrics": rnd(full.reset_index().to_dict("records"), 3),
+        "years": sorted(periods[periods.tipo == "año"].grupo.unique().tolist()),
+        "regimes": REGIMES, "regime_thresholds": rnd([q1, q2], 0),
+        "periods": rnd(periods.to_dict("records")),
+        "rolling": {hz: {"window": r["window"], "ratio": rnd(r["ratio"].tolist(), 3), "beats_pct": beats[hz]}
+                    for hz, r in roll.items()},
+        "worst": rnd(worst.to_dict("records")),
+    }
 
 
 # ----------------------------------------------------------------------------- meta.json
@@ -269,7 +305,7 @@ def export_meta(ds: Dataset, meta: dict, brent: pd.Series) -> None:
     owner, repo = slug.split("/")
     out = {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-        "data_until": meta["data_until"], "data_from": brent.index[0], "n_days": int(len(brent)),
+        "data_until": ds.index[-1], "model_data_until": meta["data_until"], "data_from": brent.index[0], "n_days": int(len(brent)),
         "years_of_data": int(brent.index[-1].year - brent.index[0].year),
         "trained_at": meta["trained_at"], "train_seconds": meta["train_seconds"],
         "arch": meta["arch"], "arch_label": f"{meta['arch']} {meta['params']['hidden']}×{meta['params']['layers']}",
@@ -299,7 +335,7 @@ def main() -> None:
     fc = export_forecast(ds, meta, sig)
     brent = export_history(fc["last_date"])
     export_events(brent)
-    export_models(meta, sig)
+    export_models(meta, sig, ds.df["brent"])
     export_meta(ds, meta, brent)
     print(f"Datos hasta {fc['last_date']:%Y-%m-%d} · modelo {meta['arch']} entrenado el {meta['trained_at']}")
 

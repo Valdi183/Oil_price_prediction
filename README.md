@@ -2,7 +2,7 @@
 
 Caso de uso III de la asignatura *Aprendizaje automático* (UAX): comparar una **RNN simple, una LSTM y una GRU** para predecir el precio del **Brent** a corto (5 días hábiles), medio (63) y largo plazo (252), e integrar el mejor modelo en una aplicación que calcule las predicciones, cuantifique su incertidumbre y las explique en lenguaje sencillo.
 
-**Web de la aplicación:** <https://valdi183.github.io/Oil_price_predicition/>
+**Web de la aplicación:** <https://valdi183.github.io/Oil_price_prediction/>
 
 > Herramienta de apoyo a la decisión, no es una recomendación de inversión.
 

@@ -41,7 +41,7 @@ from oilcast.pipeline import Dataset, forecast, load_production  # noqa: E402
 
 SITE_DATA = ROOT / "site" / "data"
 WORKFLOW_FILE = "update-site.yml"
-DEFAULT_REPO = "Valdi183/Oil_price_predicition"
+DEFAULT_REPO = "Valdi183/Oil_price_prediction"
 
 SHORT_LABELS = {"corto": "Corto plazo", "medio": "Medio plazo", "largo": "Largo plazo"}
 SUB_LABELS = {"corto": "5 días hábiles · ~1 semana", "medio": "63 días hábiles · ~3 meses",

@@ -1,4 +1,4 @@
-// Renderizado del DOM a partir de los JSON exportados por scripts/export_site.py.
+// Renderizado del DOM a partir de los JSON exportados por scripts/07_export_app_data.py.
 import { fmt, stars, pValue, mdToHtml, escapeHtml, prefersReducedMotion } from './format.js';
 
 const $ = (sel) => document.querySelector(sel);

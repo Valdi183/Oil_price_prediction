@@ -1,6 +1,6 @@
 # Actualiza los datos, calcula la predicción con el modelo ya entrenado, exporta los JSON de
 # la web y la despliega en GitHub Pages. Todo el cálculo se hace en Python dentro del runner;
-# la web (site/) solo muestra los ficheros generados.
+# la web (app/) solo muestra los ficheros generados.
 #
 # Incorporar datos y reentrenar son procesos distintos:
 #   - ACTUALIZACIÓN (por defecto): descarga los datos nuevos y el modelo publicado en Hugging
@@ -32,15 +32,15 @@ on:
   push:
     branches: [main]
     paths:
-      - "site/**"
+      - "app/**"
       - "scripts/**"
-      - "oilcast/**"
+      - "src/**"
       - "config/**"
       - "reports/**"
       - "data/**"
       - "pyproject.toml"
       - "poetry.lock"
-      - ".github/workflows/update-site.yml"
+      - ".github/workflows/daily_forecast.yml"
 
 permissions:
   contents: read
@@ -83,11 +83,11 @@ jobs:
         id: download
         # Si una fuente falla, se continúa con la instantánea versionada en data/
         continue-on-error: true
-        run: poetry run python scripts/download_data.py
+        run: poetry run python scripts/01_download_data.py
 
       - name: Aviso si la descarga falló
         if: steps.download.outcome == 'failure'
-        run: echo "::warning::La descarga de datos falló; se usa la instantánea de data/petroleo_dataset.csv"
+        run: echo "::warning::La descarga de datos falló; se usa la instantánea de data/raw/brent_dataset_raw.csv"
 
       - name: Descargar el modelo entrenado (Hugging Face Hub)
         id: fetch
@@ -95,26 +95,26 @@ jobs:
         continue-on-error: true
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}   # solo necesario si el repo del modelo es privado
-        run: poetry run python scripts/model_hub.py download
+        run: poetry run python scripts/hf_model_registry.py download
 
       - name: Reentrenar el modelo de producción
         # Solo a mano o, como respaldo, si el Hub aún no tiene modelo (primer despliegue).
-        # models/ no está versionado: retrain.py usa config/production_recipe.json
+        # models/ no está versionado: 06_train_production_model.py usa config/production_model_config.json
         if: ${{ inputs.retrain == true || steps.fetch.outcome == 'failure' }}
         run: |
           if [ "${{ inputs.retrain }}" != "true" ]; then
             echo "::warning::No se pudo descargar el modelo de Hugging Face; se entrena uno temporal (revisa HF_MODEL_REPO)"
           fi
-          poetry run python scripts/retrain.py
+          poetry run python scripts/06_train_production_model.py
 
       - name: Publicar el modelo reentrenado en Hugging Face Hub
         if: ${{ inputs.retrain == true }}
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: poetry run python scripts/model_hub.py upload
+        run: poetry run python scripts/hf_model_registry.py upload
 
       - name: Exportar los JSON de la web
-        run: poetry run python scripts/export_site.py
+        run: poetry run python scripts/07_export_app_data.py
 
       - name: Resumen
         continue-on-error: true
@@ -122,10 +122,10 @@ jobs:
           {
             echo "### Web actualizada (${{ inputs.retrain == true && 'con reentrenamiento' || 'solo datos nuevos, sin reentrenar' }})"
             echo
-            poetry run python -c "import json; m=json.load(open('site/data/meta.json')); f=json.load(open('site/data/forecast.json')); print(f\"- Datos hasta **{m['data_until']}** · último precio **{f['last_price']} \$**\"); print(f\"- Modelo {m['arch_label']} entrenado el {m['trained_at']} con datos hasta {m['model_data_until']}\"); [print(f\"- {k}: {h['price']} \$ ({h['change_pct']:+} %) · rango {h['low']}–{h['high']} \$ · fiabilidad {h['reliability']['label']}\") for k, h in f['horizons'].items()]"
+            poetry run python -c "import json; m=json.load(open('app/data/meta.json')); f=json.load(open('app/data/forecast.json')); print(f\"- Datos hasta **{m['data_until']}** · último precio **{f['last_price']} \$**\"); print(f\"- Modelo {m['arch_label']} entrenado el {m['trained_at']} con datos hasta {m['model_data_until']}\"); [print(f\"- {k}: {h['price']} \$ ({h['change_pct']:+} %) · rango {h['low']}–{h['high']} \$ · fiabilidad {h['reliability']['label']}\") for k, h in f['horizons'].items()]"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Subir site/ como artefacto de Pages
+      - name: Subir app/ como artefacto de Pages
         uses: actions/upload-pages-artifact@v3
         with:
           path: site

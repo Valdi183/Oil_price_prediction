@@ -16,81 +16,114 @@ Caso de uso III de la asignatura *Aprendizaje automático* (UAX): comparar una *
 - Presenta la **comparativa de las tres redes** frente al modelo ingenuo (tablas, barras, real vs predicho en test y test de significación) y justifica la elección.
 - Se **actualiza sola**: cada día una GitHub Action descarga los datos recientes y los pasa por el modelo ya entrenado (guardado en Hugging Face Hub), **sin reentrenar**, y vuelve a publicar la web. Reentrenar es una acción manual aparte; el botón «Actualizar ahora» lanza la Action.
 
-## Arquitectura
+## Estructura del repositorio
 
-La aplicación es una web estática en GitHub Pages, pero **todo el cálculo lo hace Python** (descarga, limpieza, predicción, intervalos, explicaciones, comparativa) dentro de GitHub Actions. La web solo lee los JSON que genera `scripts/export_site.py` y los dibuja: ninguna cifra está escrita a mano.
+Organización estándar de un proyecto de datos: datos en bruto y procesados por separado, código reutilizable en `src/`, pasos del pipeline numerados en `scripts/` y resultados en `reports/`.
 
 ```
-GitHub Actions  (.github/workflows/update-site.yml · cron días laborables + ejecución manual)
-│
-├─ 1. scripts/download_data.py   FRED (EIA, BCE, Fed, Cboe) + Yahoo Finance  →  data/petroleo_dataset.csv
-├─ 2. scripts/retrain.py         receta config/production_recipe.json        →  models/  (RNN 64×2, 5 semillas, ~13 s)
-├─ 3. scripts/export_site.py     forecast · history · events · models · meta →  site/data/*.json
-└─ 4. actions/deploy-pages       site/  →  GitHub Pages
-                                        │
-                   site/index.html + css + js (Apache ECharts)  ←  solo lectura de los JSON
+Oil_price_prediction/
+├─ data/
+│  ├─ raw/brent_dataset_raw.csv           datos tal cual se descargan (FRED + Yahoo Finance)
+│  └─ processed/
+│     ├─ brent_dataset_clean.csv          datos limpios: huecos rellenados, outliers tratados
+│     └─ brent_features.csv               las 16 variables de entrada de la red + los 3 objetivos
+├─ notebooks/
+│  └─ 01_exploratory_analysis.ipynb       análisis exploratorio (series, outliers, volatilidad, correlaciones)
+├─ src/                                   código fuente (lo importan los scripts)
+├─ scripts/                               pasos del pipeline, en orden (01 → 07)
+├─ reports/
+│  ├─ *.md                                informes: limpieza, comparativa, significación, análisis de errores
+│  ├─ tables/*.csv                        resultados en tabla (validación cruzada, comparativa, test…)
+│  └─ figures/*.png                       figuras
+├─ config/production_model_config.json    receta del modelo de producción (red, hiperparámetros, épocas)
+├─ models/                                modelo entrenado (no se versiona: está en Hugging Face Hub)
+├─ app/                                   aplicación web (index.html, css/, js/, assets/, data/*.json)
+└─ .github/workflows/daily_forecast.yml   actualización diaria y despliegue en GitHub Pages
 ```
 
-Módulos de Python (`oilcast/`):
+### Pipeline (`scripts/`)
+
+| Paso | Script | Qué hace | Salida |
+|---|---|---|---|
+| 1 | `01_download_data.py` | Descarga los datos diarios desde 2000 y los alinea con el calendario del Brent | `data/raw/` |
+| 2 | `02_clean_data.py` | Limpieza (festivos, WTI negativo, retraso de la EIA) y construcción de las 16 variables | `data/processed/`, `reports/data_cleaning.md` |
+| 3 | `03_train_compare_models.py` | Comparativa RNN vs LSTM vs GRU: validación cruzada walk-forward, test y modelo de producción (60-70 min en CPU) | `reports/comparison.md`, `reports/tables/`, `reports/figures/` |
+| 4 | `04_significance_test.py` | Test de Diebold-Mariano y combinación de referencia (reentrena las 3 redes en test) | `reports/significance.md`, `reports/tables/test_predictions.csv` |
+| 5 | `05_error_analysis.py` | MAE, MSE, RMSE, R² y cuándo acierta y cuándo falla el modelo (sin entrenar) | `reports/error_analysis.md`, `reports/figures/error_analysis.png` |
+| 6 | `06_train_production_model.py` | Reentrena el modelo elegido con todos los datos (~13 s) | `models/` |
+| 7 | `07_export_app_data.py` | Predicción con el modelo de `models/` (solo inferencia) y JSON de la web | `app/data/*.json` |
+| — | `hf_model_registry.py` | Descarga (`download`) o publica (`upload`) el modelo en Hugging Face Hub | `models/` ↔ Hub |
+
+### Código fuente (`src/`)
 
 | Módulo | Qué hace |
 |---|---|
-| `data.py` | Carga, limpieza (festivos, WTI negativo, retraso de la EIA), 16 variables, escalado sin fuga y ventanas de 60 días |
-| `models.py` | RNN / LSTM / GRU en PyTorch con el mismo bucle de entrenamiento (error Huber) |
-| `pipeline.py` | Particiones temporales, métricas, validación walk-forward, conjunto de semillas, modelo de producción y `forecast()` |
-| `explain.py` | Texto en lenguaje sencillo y nivel de fiabilidad por horizonte (métricas de test + p-valor de Diebold-Mariano) |
-| `evaluation.py` | Métricas fuera de muestra (MAE, MSE, RMSE, R²), errores por año y régimen, error móvil y peores fallos |
-| `hub.py` | Publicación y descarga del modelo en Hugging Face Hub, con su ficha |
-| `events.py` | Picos y caídas del ciclo económico localizados sobre la serie real y resumen de movimientos recientes |
-| `config.py` | Horizontes, folds de la validación cruzada, rejilla de hiperparámetros, intervalo del 80 % |
+| `config.py` | Rutas, horizontes, folds de la validación cruzada, rejilla de hiperparámetros, intervalo del 80 % |
+| `data_cleaning.py` | Carga de los datos en bruto y limpieza (festivos, WTI negativo, retraso de la EIA) |
+| `feature_engineering.py` | 16 variables, objetivos (rentabilidad logarítmica a 5/63/252 días), escalado sin fuga de información y ventanas de 60 días |
+| `models.py` | RNN / LSTM / GRU en PyTorch con el mismo bucle de entrenamiento (error de Huber) |
+| `training.py` | Particiones temporales, conjunto de 5 semillas y entrenamiento del modelo de producción |
+| `prediction.py` | Carga del modelo de producción y predicción de los tres horizontes (lo que se ejecuta cada día) |
+| `evaluation.py` | Métricas (MAE, MSE, RMSE, R², acierto de dirección), intervalo del 80 % y análisis de errores |
+| `explanations.py` | Texto en lenguaje sencillo y nivel de fiabilidad por horizonte |
+| `economic_events.py` | Picos y caídas del ciclo económico localizados sobre la serie real |
+| `model_registry.py` | Publicación y descarga del modelo en Hugging Face Hub, con su ficha |
+| `experiment_tracking.py` | Registro de las curvas de entrenamiento (TensorBoard y CSV) |
 
-Scripts:
+## Arquitectura de la aplicación
 
-| Script | Qué hace |
-|---|---|
-| `scripts/download_data.py` | Descarga los datos diarios desde 2000 |
-| `scripts/train_compare.py` | Comparativa completa RNN vs LSTM vs GRU (60-70 min en CPU) → `reports/` y modelo de producción |
-| `scripts/significance.py` | Test de Diebold-Mariano y combinación de referencia → `reports/significance.*`, `reports/test_predictions.csv` |
-| `scripts/retrain.py` | Reentrena el modelo elegido con todos los datos (lee `models/production_meta.json` o, si no existe, `config/production_recipe.json`) |
-| `scripts/error_analysis.py` | MAE, MSE, RMSE, R² y análisis de cuándo acierta y cuándo falla (sin entrenar) → `reports/error_analysis.md`, `reports/figures/error_analysis.png` |
-| `scripts/model_hub.py` | Descarga (`download`) o publica (`upload`) el modelo de producción en Hugging Face Hub |
-| `scripts/export_site.py` | Exporta los JSON de la web a `site/data/` (solo inferencia con el modelo de `models/`) |
+La aplicación es una web estática en GitHub Pages, pero **todo el cálculo lo hace Python** (descarga, limpieza, predicción, intervalos, explicaciones, comparativa) dentro de GitHub Actions. La web solo lee los JSON que genera `scripts/07_export_app_data.py` y los dibuja: ninguna cifra está escrita a mano.
+
+```
+GitHub Actions  (.github/workflows/daily_forecast.yml · cron días laborables + ejecución manual)
+│
+├─ 1. scripts/01_download_data.py           FRED + Yahoo Finance        →  data/raw/
+├─ 2. scripts/hf_model_registry.py download  modelo ya entrenado (Hub)   →  models/
+│     (o, solo al reentrenar a mano: scripts/06_train_production_model.py + upload al Hub)
+├─ 3. scripts/07_export_app_data.py         predicción, histórico, eventos, comparativa → app/data/*.json
+└─ 4. actions/deploy-pages                  app/  →  GitHub Pages
+                                                  │
+                    app/index.html + css + js (Apache ECharts)  ←  solo lectura de los JSON
+```
 
 ## Ejecutar en local
 
 Requisitos: Python ≥ 3.12 y [Poetry](https://python-poetry.org). `torch` se instala desde el índice CPU de PyTorch (sin CUDA).
 
 ```bash
-poetry install                                   # crea .venv/ en el proyecto
-poetry run python scripts/download_data.py       # datos recientes (FRED + Yahoo Finance)
-poetry run python scripts/train_compare.py       # opcional: comparativa completa (60-70 min)
-poetry run python scripts/significance.py        # opcional: Diebold-Mariano (reentrena las 3 redes en test)
-poetry run python scripts/error_analysis.py      # opcional: MAE/MSE/RMSE/R² y análisis de errores (sin entrenar)
-poetry run python scripts/retrain.py             # modelo de producción con la receta (~13 s)
-# o, sin entrenar: HF_MODEL_REPO=usuario/nombre poetry run python scripts/model_hub.py download
-poetry run python scripts/export_site.py         # JSON de la web → site/data/
-python -m http.server -d site                    # abre http://localhost:8000
+poetry install                                          # crea .venv/ en el proyecto
+poetry run python scripts/01_download_data.py           # datos recientes (FRED + Yahoo Finance)
+poetry run python scripts/02_clean_data.py              # datos limpios y variables → data/processed/
+poetry run python scripts/03_train_compare_models.py    # opcional: comparativa completa (60-70 min)
+poetry run python scripts/04_significance_test.py       # opcional: Diebold-Mariano (reentrena las 3 redes en test)
+poetry run python scripts/05_error_analysis.py          # opcional: MAE/MSE/RMSE/R² y análisis de errores
+poetry run python scripts/06_train_production_model.py  # modelo de producción con la receta (~13 s)
+# o, sin entrenar: HF_MODEL_REPO=Valdi183/brent-rnn-forecast poetry run python scripts/hf_model_registry.py download
+poetry run python scripts/07_export_app_data.py         # JSON de la web → app/data/
+python -m http.server -d app                            # abre http://localhost:8000
 ```
 
-`models/` no se versiona (el modelo se publica en Hugging Face Hub con `scripts/model_hub.py`); por eso `retrain.py` puede partir de la receta versionada `config/production_recipe.json` (arquitectura, hiperparámetros, épocas, cuantiles del intervalo y métricas de test de la comparativa).
+Notebook de análisis exploratorio: `poetry install --with notebooks` y abrir `notebooks/01_exploratory_analysis.ipynb` (se puede leer directamente en GitHub, con los gráficos ya generados).
+
+`models/` no se versiona (el modelo se publica en Hugging Face Hub con `scripts/hf_model_registry.py`); por eso `06_train_production_model.py` puede partir de la receta versionada `config/production_model_config.json` (arquitectura, hiperparámetros, épocas, cuantiles del intervalo y métricas de test de la comparativa).
 
 Las curvas de entrenamiento se pueden seguir con `poetry run tensorboard --logdir runs`.
 
 ## Actualización automática y GitHub Pages
 
-El flujo `.github/workflows/update-site.yml`:
+El flujo `.github/workflows/daily_forecast.yml`:
 
 - se ejecuta **cada día laborable** (07:30 UTC), **a mano** (pestaña *Actions* → *Actualizar predicción y desplegar la web* → *Run workflow*; es el enlace del botón «Actualizar ahora» de la web) y al hacer push en `main` de ficheros que afecten a la web o al pipeline;
 - **incorporar datos y reentrenar son procesos distintos**:
-  - **actualización (por defecto, diaria)**: descarga los datos nuevos (si una fuente falla, sigue con la instantánea de `data/`) y el modelo ya entrenado desde **Hugging Face Hub**, y el último dato pasa por el modelo. **No se entrena nada**;
+  - **actualización (por defecto, diaria)**: descarga los datos nuevos (si una fuente falla, sigue con la instantánea de `data/raw/`) y el modelo ya entrenado desde **Hugging Face Hub**, y el último dato pasa por el modelo. **No se entrena nada**;
   - **reentrenamiento (solo a mano)**: *Run workflow* marcando *Reentrenar*. Entrena el conjunto con todos los datos (~13 s en CPU) y publica la nueva versión en el Hub, que pasa a ser la que usan las actualizaciones diarias;
-- cachea `.venv` por el hash de `poetry.lock`, exporta los JSON y despliega `site/` con `actions/upload-pages-artifact` + `actions/deploy-pages`.
+- cachea `.venv` por el hash de `poetry.lock`, exporta los JSON y despliega `app/` con `actions/upload-pages-artifact` + `actions/deploy-pages`.
 
 Configuración del modelo en Hugging Face (una vez):
 
 1. Crea un token de escritura en <https://huggingface.co/settings/tokens>.
 2. En GitHub: **Settings → Secrets and variables → Actions** → *Variables*: `HF_MODEL_REPO` = `usuario/nombre-del-modelo`; *Secrets*: `HF_TOKEN` = el token.
-3. Publica el modelo actual (desde local, con `models/` entrenado): `HF_MODEL_REPO=usuario/nombre HF_TOKEN=... poetry run python scripts/model_hub.py upload`, o lanza la Action con *Reentrenar*.
+3. Publica el modelo actual (desde local, con `models/` entrenado): `HF_MODEL_REPO=usuario/nombre HF_TOKEN=... poetry run python scripts/hf_model_registry.py upload`, o lanza la Action con *Reentrenar*.
 
 Si el Hub aún no tiene modelo, la Action entrena uno temporal como respaldo para que la web no se rompa (y lo avisa).
 
@@ -141,16 +174,3 @@ La RNN se entrenó solo con datos hasta el 31/12/2022 y se comparan sus predicci
 Todos los datos son diarios (días hábiles) y gratuitos, sin clave. La EIA publica el Brent spot con unos días de retraso: hasta que llega el dato nuevo, se repite el último valor disponible (como indica el enunciado para los huecos).
 
 La **cesta de la OPEP (ORB)** no se incluye: no está en FRED ni en Yahoo Finance y la OPEP solo la publica en su web, sin una descarga estable que una actualización diaria automática pueda usar. Además sigue muy de cerca al Brent, que ya es la variable objetivo, así que aportaría poca información nueva.
-
-## Estructura del repositorio
-
-```
-.github/workflows/update-site.yml   Action: datos → modelo del Hub (o reentrenar a mano) → exportar → Pages
-config/production_recipe.json       receta del modelo de producción (versionada)
-data/petroleo_dataset.csv           instantánea del dataset
-docs/assignment/ENUNCIADO.pdf       enunciado del caso de uso
-oilcast/                            código del proyecto (datos, modelos, pipeline, explicación, eventos)
-reports/                            comparativa, significación, predicciones de test y figuras
-scripts/                            descarga, comparativa, significación, reentrenamiento, exportación
-site/                               web estática (index.html, css/, js/, assets/, data/)
-```

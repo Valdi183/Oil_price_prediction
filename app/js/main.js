@@ -173,7 +173,7 @@ async function main() {
     Object.assign(data, { forecast, history, events, models, meta });
   } catch (err) {
     console.error(err);
-    R.showToast(`No se pudieron cargar los datos de la web. Ejecuta scripts/export_site.py. (${err.message})`);
+    R.showToast(`No se pudieron cargar los datos de la web. Ejecuta scripts/07_export_app_data.py. (${err.message})`);
     document.body.classList.remove('is-loading');
     return;
   }

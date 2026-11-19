@@ -166,7 +166,7 @@ venv.bak/
 # Rope project settings
 .ropeproject
 
-# mkdocs/Zensical documentation (no se usa: site/ es la web estática del proyecto)
+# mkdocs/Zensical documentation (no se usa: app/ es la web estática del proyecto)
 # /site
 
 # mypy
@@ -224,3 +224,6 @@ runs/
 
 # Modelos entrenados: se publican en Hugging Face Hub, no en GitHub
 models/
+
+# Enunciado de la asignatura (material del curso: no se publica en el repositorio)
+docs/assignment/

@@ -10,10 +10,16 @@ elegidas en la validación cruzada, leídas de reports/tables/comparison.csv; mi
      cada red frente al ingenuo y las redes entre sí, por horizonte.
   3. Fila de referencia "combinación": media de las predicciones de las tres redes.
      Es solo informativa: el modelo integrado en la aplicación sigue siendo una única red.
+  4. Errores fuera de muestra de la red elegida (validación cruzada 2017-2022 + test 2023 -> hoy),
+     los mismos con los que se construye el intervalo del 80 % del modelo de producción. Se
+     comprueba que reproducen sus cuantiles. La aplicación los usa para el simulador, la
+     probabilidad de precio y la calculadora de posición (distribución empírica del error).
 
 Uso:  poetry run python scripts/04_significance_test.py
-Salidas: reports/tables/significance.csv, reports/significance.md, reports/tables/test_predictions.csv
+Salidas: reports/tables/significance.csv, reports/significance.md, reports/tables/test_predictions.csv,
+         reports/tables/forecast_errors.csv
 """
+import json
 import re
 import sys
 from itertools import combinations
@@ -26,7 +32,7 @@ import pandas as pd
 from scipy import stats
 
 from src import config as C
-from src.evaluation import horizon_metrics
+from src.evaluation import horizon_metrics, residual_quantiles
 from src.training import Dataset, make_split, train_ensemble
 
 NAIVE = "Ingenuo"
@@ -120,6 +126,41 @@ def main():
 
     write_markdown(sig, combo_mets, comp, info)
     print("\n" + (C.REPORTS_DIR / "significance.md").read_text(encoding="utf-8"))
+
+    # ---------------------------------------------------------------- 6) Errores fuera de muestra
+    export_forecast_errors(ds, comp, split, preds)
+
+
+def export_forecast_errors(ds, comp, test_split, preds):
+    """Residuos (log-rentabilidad real - predicha) de la red elegida fuera de muestra: los tres
+    folds de la validación cruzada (época elegida) y el test. Son los que definen el intervalo
+    del 80 % del modelo de producción (scripts/03_train_compare_models.py)."""
+    winner = comp.loc[comp["score_cv"].idxmin()]
+    arch, n_ep = winner["red"], int(winner["epocas"])
+    params = parse_cfg(winner["hiperparametros"])
+    frames = []
+    for k, (s, e) in enumerate(C.CV_FOLDS, start=1):
+        sp = make_split(ds, train_end=s, eval_start=s, eval_end=e, eval_cutoff=C.TEST_START)
+        pred, _, _ = train_ensemble(ds, arch, params, sp, C.ENSEMBLE_SEEDS, n_ep).at_epoch(ds, n_ep)
+        frames.append((f"cv{k}", sp.ev_origins, sp.y_ev - pred))
+    frames.append(("test", test_split.ev_origins, test_split.y_ev - preds[arch]))
+
+    rows = []
+    for fase, origins, res in frames:
+        df = pd.DataFrame(res, columns=[f"error_{h}" for h in C.HORIZONS])
+        df.insert(0, "fase", fase)
+        df.insert(0, "fecha_origen", ds.index[origins].date)
+        rows.append(df)
+    out = pd.concat(rows, ignore_index=True)
+    out.to_csv(C.TABLES_DIR / "forecast_errors.csv", index=False, float_format="%.6f")
+
+    q = residual_quantiles(out[[f"error_{h}" for h in C.HORIZONS]].to_numpy())
+    ref = json.loads(C.PRODUCTION_CONFIG_PATH.read_text(encoding="utf-8"))["interval_quantiles"]
+    print(f"\nErrores fuera de muestra de {arch} ({len(out)} orígenes) -> reports/tables/forecast_errors.csv")
+    for h in C.HORIZONS:
+        ok = np.allclose(q[h], ref[h], atol=1e-6)
+        print(f"  {h:5s} cuantiles 10/90 {np.round(q[h], 4).tolist()}  "
+              f"{'OK (= intervalo del modelo de producción)' if ok else f'DIFERENTE de {np.round(ref[h], 4).tolist()}'}")
 
 
 def write_markdown(sig, combo_mets, comp, info):

@@ -13,6 +13,7 @@ Ficheros generados (cifras redondeadas a 2 decimales):
     history.json   serie diaria del Brent desde 2000, medias móviles de 50/200 días y WTI
     events.json    picos y caídas del ciclo económico situados sobre la serie real
     models.json    comparativa RNN/LSTM/GRU, tabla a igual tamaño, Diebold-Mariano y predicciones de test
+    tools.json     simulador a 1-252 días, distribución del error, escenarios históricos y backtest
     meta.json      fechas de datos y reentrenamiento, arquitectura y enlaces (repo, Action, web)
 """
 from __future__ import annotations
@@ -35,6 +36,8 @@ sys.path.insert(0, str(ROOT))
 from src.config import (APP_DATA_DIR, CV_FOLDS, HORIZONS, INTERVAL_HIGH_Q, INTERVAL_LOW_Q,  # noqa: E402
                         TABLES_DIR, TEST_START, WINDOW)
 from src.data_cleaning import clean, load_raw  # noqa: E402
+from src.decision_tools import (backtest_trades, crisis_scenarios, historical_moves,  # noqa: E402
+                                load_forecast_errors, simulator_grid)
 from src.evaluation import (REGIMES, by_group, full_metrics, load_test_predictions, regimes,  # noqa: E402
                                 rolling_ratio, worst_errors)
 from src.economic_events import locate_events, recent_movements  # noqa: E402
@@ -300,6 +303,22 @@ def validation_block(tp: pd.DataFrame, full: pd.DataFrame, brent: pd.Series) -> 
     }
 
 
+# ----------------------------------------------------------------------------- tools.json
+def export_tools(ds: Dataset, fc: dict) -> None:
+    """Simulador a 1-252 días, distribución del error, escenarios históricos y backtest
+    (src/decision_tools.py). La web solo los combina con lo que escribe el usuario."""
+    brent = ds.df["brent"]
+    tp = pd.read_csv(TABLES_DIR / "test_predictions.csv", parse_dates=["fecha_origen"])
+    out = {
+        "last_date": fc["last_date"], "last_price": fc["last_price"], "contract_barrels": 1000,
+        "simulator": simulator_grid(fc, load_forecast_errors()),
+        "historical": historical_moves(brent),
+        "scenarios": crisis_scenarios(brent),
+        "backtest": backtest_trades(tp, brent),
+    }
+    dump("tools.json", rnd(out, 5))
+
+
 # ----------------------------------------------------------------------------- meta.json
 def export_meta(ds: Dataset, meta: dict, brent: pd.Series) -> None:
     slug = repo_slug()
@@ -337,6 +356,7 @@ def main() -> None:
     brent = export_history(fc["last_date"])
     export_events(brent)
     export_models(meta, sig, ds.df["brent"])
+    export_tools(ds, fc)
     export_meta(ds, meta, brent)
     print(f"Datos hasta {fc['last_date']:%Y-%m-%d} · modelo {meta['arch']} entrenado el {meta['trained_at']}")
 

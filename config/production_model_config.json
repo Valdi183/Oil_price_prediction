@@ -1,5 +1,5 @@
 {
-  "_comment": "Receta del modelo de producción elegido en la comparativa (scripts/train_compare.py). La usa scripts/retrain.py cuando no existe models/production_meta.json (p. ej. en GitHub Actions). No editar a mano: copiar de models/production_meta.json tras una nueva comparativa.",
+  "_comment": "Receta del modelo de producción elegido en la comparativa (scripts/03_train_compare_models.py). La usa scripts/06_train_production_model.py cuando no existe models/production_meta.json (p. ej. en GitHub Actions). No editar a mano: copiar de models/production_meta.json tras una nueva comparativa.",
   "comparison_generated": "2026-11-15 17:43",
   "comparison_data_until": "2026-11-11",
   "n_params": 13763,

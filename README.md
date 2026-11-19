@@ -20,7 +20,7 @@ Caso de uso III de la asignatura *Aprendizaje automático* (UAX): comparar una *
   - **escenarios históricos**: qué pasaría con el precio y con tu posición si se repitiera, en ese plazo, el movimiento de 2008, 2014-2016, 2020, 2022 o 2026, junto a la variación habitual del Brent desde 2000;
   - **backtest de señales** 2023 → hoy (periodo que la red nunca vio): operar según la dirección prevista frente a solo comprar, seguir la tendencia o comprar y mantener, con costes por operación, capital, máxima caída, resultados por año y la sensibilidad al día de inicio.
 - Presenta la **comparativa de las tres redes** frente al modelo ingenuo (tablas, barras, real vs predicho en test y test de significación) y justifica la elección.
-- Se **actualiza sola**: cada día una GitHub Action descarga los datos recientes y los pasa por el modelo ya entrenado (guardado en Hugging Face Hub), **sin reentrenar**, y vuelve a publicar la web. Reentrenar es una acción manual aparte; el botón «Actualizar ahora» lanza la Action.
+- Se **actualiza sola**: cada día una GitHub Action descarga los datos recientes y los pasa por el modelo ya entrenado (guardado en Hugging Face Hub), **sin reentrenar**, y vuelve a publicar la web. Reentrenar es un proceso aparte.
 
 ## Estructura del repositorio
 
@@ -82,11 +82,10 @@ Oil_price_prediction/
 La aplicación es una web estática en GitHub Pages, pero **todo el cálculo lo hace Python** (descarga, limpieza, predicción, intervalos, explicaciones, comparativa) dentro de GitHub Actions. La web solo lee los JSON que genera `scripts/07_export_app_data.py` y los dibuja: ninguna cifra está escrita a mano. En el simulador, Python precalcula la trayectoria, los percentiles del error para cada día, los escenarios y las operaciones del backtest (`app/data/tools.json`); el navegador solo los combina con lo que escribe el usuario (días, precio, cantidad, costes).
 
 ```
-GitHub Actions  (.github/workflows/daily_forecast.yml · cron días laborables + ejecución manual)
+GitHub Actions  (.github/workflows/daily_forecast.yml · cada día laborable)
 │
 ├─ 1. scripts/01_download_data.py           FRED + Yahoo Finance        →  data/raw/
 ├─ 2. scripts/hf_model_registry.py download  modelo ya entrenado (Hub)   →  models/
-│     (o, solo al reentrenar a mano: scripts/06_train_production_model.py + upload al Hub)
 ├─ 3. scripts/07_export_app_data.py         predicción, histórico, eventos, comparativa → app/data/*.json
 └─ 4. actions/deploy-pages                  app/  →  GitHub Pages
                                                   │
@@ -116,25 +115,9 @@ Notebook de análisis exploratorio: `poetry install --with notebooks` y abrir `n
 
 Las curvas de entrenamiento se pueden seguir con `poetry run tensorboard --logdir runs`.
 
-## Actualización automática y GitHub Pages
+## Actualización automática
 
-El flujo `.github/workflows/daily_forecast.yml`:
-
-- se ejecuta **cada día laborable** (07:30 UTC), **a mano** (pestaña *Actions* → *Actualizar predicción y desplegar la web* → *Run workflow*; es el enlace del botón «Actualizar ahora» de la web) y al hacer push en `main` de ficheros que afecten a la web o al pipeline;
-- **incorporar datos y reentrenar son procesos distintos**:
-  - **actualización (por defecto, diaria)**: descarga los datos nuevos (si una fuente falla, sigue con la instantánea de `data/raw/`) y el modelo ya entrenado desde **Hugging Face Hub**, y el último dato pasa por el modelo. **No se entrena nada**;
-  - **reentrenamiento (solo a mano)**: *Run workflow* marcando *Reentrenar*. Entrena el conjunto con todos los datos (~13 s en CPU) y publica la nueva versión en el Hub, que pasa a ser la que usan las actualizaciones diarias;
-- cachea `.venv` por el hash de `poetry.lock`, exporta los JSON y despliega `app/` con `actions/upload-pages-artifact` + `actions/deploy-pages`.
-
-Configuración del modelo en Hugging Face (una vez):
-
-1. Crea un token de escritura en <https://huggingface.co/settings/tokens>.
-2. En GitHub: **Settings → Secrets and variables → Actions** → *Variables*: `HF_MODEL_REPO` = `usuario/nombre-del-modelo`; *Secrets*: `HF_TOKEN` = el token.
-3. Publica el modelo actual (desde local, con `models/` entrenado): `HF_MODEL_REPO=usuario/nombre HF_TOKEN=... poetry run python scripts/hf_model_registry.py upload`, o lanza la Action con *Reentrenar*.
-
-Si el Hub aún no tiene modelo, la Action entrena uno temporal como respaldo para que la web no se rompa (y lo avisa).
-
-Para activarlo en un fork: **Settings → Pages → Build and deployment → Source: GitHub Actions**. La URL será `https://<usuario>.github.io/<repo>/` (la web deduce el repositorio de `git remote` o de `GITHUB_REPOSITORY`).
+Cada día laborable (07:30 UTC) el flujo `.github/workflows/daily_forecast.yml` descarga los datos nuevos (si una fuente falla, sigue con la instantánea de `data/raw/`), descarga el modelo ya entrenado desde **Hugging Face Hub**, pasa el último dato por el modelo, exporta los JSON y vuelve a publicar `app/` en GitHub Pages. **No se entrena nada**: incorporar datos nuevos y reentrenar son procesos distintos, y el reentrenamiento queda fuera de la actualización diaria. La publicación se hace como artefacto de Pages, así que la actualización no genera commits en el repositorio.
 
 ## Resultados clave
 

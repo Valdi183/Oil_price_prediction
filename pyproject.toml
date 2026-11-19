@@ -36,3 +36,13 @@ torch = { source = "pytorch-cpu" }
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 priority = "explicit"
+
+# Notebook de análisis exploratorio (opcional; la Action no lo instala):
+#   poetry install --with notebooks
+[tool.poetry.group.notebooks]
+optional = true
+
+[tool.poetry.group.notebooks.dependencies]
+ipykernel = "^7.4.0"
+nbformat = "^5.11.1"
+nbclient = "^0.11.0"

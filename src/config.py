@@ -2,10 +2,29 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DATA_PATH = ROOT / "data" / "petroleo_dataset.csv"
-MODELS_DIR = ROOT / "models"
+
+# Datos: raw = tal cual se descargan; processed = limpios y con las variables del modelo
+DATA_DIR = ROOT / "data"
+RAW_DATA_PATH = DATA_DIR / "raw" / "brent_dataset_raw.csv"
+PROCESSED_DIR = DATA_DIR / "processed"
+CLEAN_DATA_PATH = PROCESSED_DIR / "brent_dataset_clean.csv"
+FEATURES_PATH = PROCESSED_DIR / "brent_features.csv"
+
+# Resultados: informes (.md), tablas (.csv) y figuras (.png)
 REPORTS_DIR = ROOT / "reports"
+TABLES_DIR = REPORTS_DIR / "tables"
 FIGURES_DIR = REPORTS_DIR / "figures"
+
+# Aplicación web (GitHub Pages): los JSON que muestra se generan en app/data/
+APP_DIR = ROOT / "app"
+APP_DATA_DIR = APP_DIR / "data"
+
+# Modelo de producción (no se versiona: se publica en Hugging Face Hub)
+MODELS_DIR = ROOT / "models"
+PROD_MODEL = MODELS_DIR / "production_model.pt"
+PROD_PRE = MODELS_DIR / "production_preprocessor.pkl"
+PROD_META = MODELS_DIR / "production_meta.json"
+PRODUCTION_CONFIG_PATH = ROOT / "config" / "production_model_config.json"
 
 # Horizontes de predicción en días hábiles
 HORIZONS = {"corto": 5, "medio": 63, "largo": 252}

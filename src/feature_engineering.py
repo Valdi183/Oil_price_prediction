@@ -1,11 +1,17 @@
-"""Carga, limpieza, ingeniería de variables y preprocesado (escalado + ventanas)."""
+"""Ingeniería de variables, objetivos, escalado y ventanas temporales para las redes recurrentes.
+
+datos limpios -> build_features() (16 variables) + build_targets() (rentabilidad a 5/63/252 días)
+              -> Preprocessor (winsorización + escalado, ajustado SOLO con entrenamiento)
+              -> make_windows() (ventanas de 60 días: entrada de la red)
+"""
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
-from .config import DATA_PATH, H_VALUES, WINDOW
+from .config import H_VALUES, RAW_DATA_PATH, WINDOW
+from .data_cleaning import load_clean
 
 # Variables explicativas que entran en la red (todas diarias)
 FEATURES = [
@@ -28,37 +34,6 @@ FEATURES = [
 ]
 # Variables de rentabilidad: se recortan (winsorizan) para limitar outliers
 RETURN_FEATURES = [f for f in FEATURES if f.startswith("ret_")]
-
-
-def load_raw(path=DATA_PATH) -> pd.DataFrame:
-    df = pd.read_csv(path, index_col=0, parse_dates=True)
-    return df.sort_index()
-
-
-def clean(raw: pd.DataFrame) -> pd.DataFrame:
-    """Limpieza de valores faltantes y outliers 'físicos'."""
-    df = raw[~raw.index.duplicated(keep="last")].copy()
-
-    # 1) La EIA publica el Brent spot con unos días de retraso: el script de descarga
-    #    rellena esos últimos días con el último valor (ffill). Se eliminan las filas
-    #    finales en las que el Brent está repetido pero el futuro sí se ha movido.
-    if "brent_fut_Close" in df:
-        while len(df) > 2:
-            last, prev = df.iloc[-1], df.iloc[-2]
-            if last["brent"] == prev["brent"] and last["brent_fut_Close"] != prev["brent_fut_Close"]:
-                df = df.iloc[:-1]
-            else:
-                break
-
-    # 2) WTI negativo (20/04/2020, -37 $): anomalía técnica del vencimiento del futuro,
-    #    no un precio económico real. Se trata como dato faltante.
-    for col in ["wti", "wti_fut_Close"]:
-        if col in df:
-            df.loc[df[col] <= 0, col] = np.nan
-
-    # 3) Festivos distintos en cada mercado -> último valor disponible
-    df = df.ffill().bfill()
-    return df
 
 
 def _logret(s: pd.Series, n: int = 1) -> pd.Series:
@@ -95,9 +70,9 @@ def build_targets(brent: pd.Series) -> pd.DataFrame:
     return pd.DataFrame({f"h{h}": lb.shift(-h) - lb for h in H_VALUES}, index=brent.index)
 
 
-def prepare_dataset(path=DATA_PATH):
+def prepare_dataset(path=RAW_DATA_PATH):
     """Devuelve (df_limpio, features, targets) alineados y sin NaN al inicio."""
-    df = clean(load_raw(path))
+    df = load_clean(path)
     feats = build_features(df)
     first_valid = feats.dropna().index[0]
     df, feats = df.loc[first_valid:], feats.loc[first_valid:]

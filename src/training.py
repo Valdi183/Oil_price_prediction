@@ -1,4 +1,4 @@
-"""Particiones temporales, métricas, validación walk-forward y modelo de producción."""
+"""Particiones temporales (walk-forward), entrenamiento del conjunto de semillas y del modelo de producción."""
 from __future__ import annotations
 
 import json
@@ -11,9 +11,10 @@ import numpy as np
 import pandas as pd
 import torch
 
-from .config import (H_VALUES, HORIZONS, INTERVAL_HIGH_Q, INTERVAL_LOW_Q, MODELS_DIR, WINDOW)
-from .data import FEATURES, Preprocessor, make_windows, masked_targets, prepare_dataset
-from .models import RecurrentForecaster, count_params, predict, train_model
+from .config import ENSEMBLE_SEEDS, HORIZONS, MODELS_DIR, PROD_META, PROD_MODEL, PROD_PRE, WINDOW
+from .evaluation import horizon_metrics
+from .feature_engineering import FEATURES, Preprocessor, make_windows, masked_targets, prepare_dataset
+from .models import count_params, train_model
 
 
 # ----------------------------------------------------------------------------
@@ -78,54 +79,6 @@ def make_split(ds: Dataset, train_end, eval_start=None, eval_end=None, eval_cuto
 
 
 # ----------------------------------------------------------------------------
-# Métricas (en dólares por barril)
-# ----------------------------------------------------------------------------
-def horizon_metrics(pred_lr: np.ndarray, true_lr: np.ndarray, price0: np.ndarray) -> list[dict]:
-    """Métricas por horizonte. pred_lr/true_lr: log-rentabilidades (n, 3); price0: precio en t."""
-    rows = []
-    for j, (name, h) in enumerate(HORIZONS.items()):
-        m = ~np.isnan(true_lr[:, j])
-        if m.sum() == 0:
-            continue
-        p0 = price0[m]
-        real = p0 * np.exp(true_lr[m, j])
-        pred = p0 * np.exp(pred_lr[m, j])
-        err, err_naive = pred - real, p0 - real
-        mse, mse_n = np.mean(err ** 2), np.mean(err_naive ** 2)
-        mae, mae_n = np.mean(np.abs(err)), np.mean(np.abs(err_naive))
-        moved = true_lr[m, j] != 0
-        dir_acc = np.mean(np.sign(pred_lr[m, j][moved]) == np.sign(true_lr[m, j][moved]))
-        rows.append({
-            "horizonte": name, "h": h, "n": int(m.sum()),
-            "MSE": mse, "MAE": mae, "RMSE": np.sqrt(mse),
-            "MAE_ingenuo": mae_n, "RMSE_ingenuo": np.sqrt(mse_n),
-            "mejora_RMSE_%": 100 * (1 - np.sqrt(mse) / np.sqrt(mse_n)),
-            "mejora_MAE_%": 100 * (1 - mae / mae_n),
-            "acierto_direccion_%": 100 * dir_acc,
-        })
-    return rows
-
-
-def residual_quantiles(residuals: np.ndarray) -> dict:
-    """Cuantiles empíricos de (real - predicho) en log-rentabilidad -> intervalo del 80 %."""
-    out = {}
-    for j, name in enumerate(HORIZONS):
-        r = residuals[:, j][~np.isnan(residuals[:, j])]
-        out[name] = (float(np.quantile(r, INTERVAL_LOW_Q)), float(np.quantile(r, INTERVAL_HIGH_Q)))
-    return out
-
-
-def interval_coverage(pred_lr, true_lr, quantiles) -> dict:
-    cov = {}
-    for j, name in enumerate(HORIZONS):
-        m = ~np.isnan(true_lr[:, j])
-        lo, hi = quantiles[name]
-        inside = (true_lr[m, j] >= pred_lr[m, j] + lo) & (true_lr[m, j] <= pred_lr[m, j] + hi)
-        cov[name] = 100 * float(inside.mean())
-    return cov
-
-
-# ----------------------------------------------------------------------------
 # Entrenamiento + evaluación: conjunto (ensemble) de semillas
 # ----------------------------------------------------------------------------
 @dataclass
@@ -176,16 +129,10 @@ def train_ensemble(ds: Dataset, arch: str, params: dict, split: Split, seeds: li
 # ----------------------------------------------------------------------------
 # Modelo de producción (el que usa la aplicación)
 # ----------------------------------------------------------------------------
-PROD_MODEL = MODELS_DIR / "production_model.pt"
-PROD_PRE = MODELS_DIR / "production_preprocessor.pkl"
-PROD_META = MODELS_DIR / "production_meta.json"
-
-
 def train_production(arch: str, params: dict, n_epochs: int, quantiles: dict, test_metrics: list[dict],
                      extra_meta: dict | None = None, ds: Dataset | None = None, track=None):
     """Entrena el conjunto de la arquitectura elegida con TODOS los datos disponibles durante
-    las épocas elegidas en la validación cruzada y guarda los artefactos."""
-    from .config import ENSEMBLE_SEEDS
+    las épocas elegidas en la validación cruzada y guarda los artefactos en models/."""
     ds = ds or Dataset.load()
     run = train_ensemble(ds, arch, params, make_split(ds, train_end=None), ENSEMBLE_SEEDS,
                          n_epochs, track=track)
@@ -206,41 +153,3 @@ def train_production(arch: str, params: dict, n_epochs: int, quantiles: dict, te
     }
     PROD_META.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
     return meta
-
-
-def load_production():
-    meta = json.loads(PROD_META.read_text(encoding="utf-8"))
-    with open(PROD_PRE, "rb") as fh:
-        pre = pickle.load(fh)
-    p = meta["params"]
-    members = []
-    for sd in torch.load(PROD_MODEL, map_location="cpu")["members"]:
-        m = RecurrentForecaster(meta["arch"], len(meta["features"]), p["hidden"], p["layers"],
-                                p.get("dropout", 0.2))
-        m.load_state_dict(sd)
-        m.eval()
-        members.append(m)
-    return members, pre, meta
-
-
-def forecast(ds: Dataset | None = None, bundle=None) -> dict:
-    """Predicción del conjunto para los tres horizontes desde el último dato disponible."""
-    ds = ds or Dataset.load()
-    members, pre, meta = bundle or load_production()
-    x = pre.transform(ds.feats)
-    X = make_windows(x, np.array([len(x) - 1]))
-    pred_lr = pre.unscale_targets(np.mean([predict(m, X) for m in members], axis=0))[0]
-    p0 = float(ds.df["brent"].iloc[-1])
-    last_date = ds.index[-1]
-    out = {"last_date": last_date, "last_price": p0, "horizons": {}}
-    for j, (name, h) in enumerate(HORIZONS.items()):
-        lo, hi = meta["interval_quantiles"][name]
-        out["horizons"][name] = {
-            "h": h,
-            "target_date": last_date + pd.offsets.BDay(h),
-            "price": p0 * float(np.exp(pred_lr[j])),
-            "low": p0 * float(np.exp(pred_lr[j] + lo)),
-            "high": p0 * float(np.exp(pred_lr[j] + hi)),
-            "change_pct": 100 * float(np.exp(pred_lr[j]) - 1),
-        }
-    return out

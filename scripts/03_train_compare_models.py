@@ -20,11 +20,11 @@ Durante la ejecución se muestran las curvas de aprendizaje (error / error_ingen
 en consola y en TensorBoard:  poetry run tensorboard --logdir runs
 
 Uso:
-    poetry run python scripts/train_compare.py                    # experimento completo
-    poetry run python scripts/train_compare.py --quick            # prueba rápida
-    poetry run python scripts/train_compare.py --quiet            # sin una línea por época
-    poetry run python scripts/train_compare.py --skip-equal-size  # sin la fase 4
-    poetry run python scripts/train_compare.py --equal-size-only  # solo la fase 4
+    poetry run python scripts/03_train_compare_models.py                    # experimento completo
+    poetry run python scripts/03_train_compare_models.py --quick            # prueba rápida
+    poetry run python scripts/03_train_compare_models.py --quiet            # sin una línea por época
+    poetry run python scripts/03_train_compare_models.py --skip-equal-size  # sin la fase 4
+    poetry run python scripts/03_train_compare_models.py --equal-size-only  # solo la fase 4
 """
 import argparse
 import sys
@@ -40,10 +40,10 @@ import numpy as np
 import pandas as pd
 import torch
 
-from oilcast import config as C
-from oilcast.pipeline import (Dataset, interval_coverage, make_split, residual_quantiles,
-                              train_ensemble, train_production)
-from oilcast.tracking import Tracker, cfg_label
+from src import config as C
+from src.evaluation import interval_coverage, residual_quantiles
+from src.experiment_tracking import Tracker, cfg_label
+from src.training import Dataset, make_split, train_ensemble, train_production
 
 COLORS = {"RNN": "#8c8c8c", "LSTM": "#1f77b4", "GRU": "#d62728"}
 
@@ -102,7 +102,7 @@ def run(quick: bool, verbose: bool, equal_size: bool):
         C.PARAM_GRID[:] = C.PARAM_GRID[:1]
         C.ENSEMBLE_SEEDS[:] = C.ENSEMBLE_SEEDS[:2]
 
-    C.REPORTS_DIR.mkdir(exist_ok=True)
+    C.TABLES_DIR.mkdir(parents=True, exist_ok=True)
     C.FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     tracker = Tracker(C.RUNS_DIR, verbose=verbose)
     ds = Dataset.load()
@@ -132,7 +132,7 @@ def run(quick: bool, verbose: bool, equal_size: bool):
                   f"     curva media por época: {curve}", flush=True)
             if arch not in best or res["score_cv"] < best[arch]["score_cv"]:
                 best[arch] = res
-    pd.DataFrame(cv_rows).to_csv(C.REPORTS_DIR / "cv_results.csv", index=False)
+    pd.DataFrame(cv_rows).to_csv(C.TABLES_DIR / "cv_results.csv", index=False)
 
     # ------------------------------------------------------------------ 2) Test 2023 -> hoy
     test_split = make_split(ds, train_end=C.TEST_START, eval_start=C.TEST_START)
@@ -167,7 +167,7 @@ def run(quick: bool, verbose: bool, equal_size: bool):
             f"{r_['horizonte']}: {r_['mejora_RMSE_%']:+.1f}% (miembros {r_['mejora_media_miembros_%']:+.1f}"
             f" ±{r_['std_mejora_RMSE_%']:.1f})" for r_ in comp_rows[-len(mets):]), flush=True)
     comp = pd.DataFrame(comp_rows)
-    comp.to_csv(C.REPORTS_DIR / "comparison.csv", index=False)
+    comp.to_csv(C.TABLES_DIR / "comparison.csv", index=False)
 
     # ------------------------------------------------------------------ 3) Selección
     winner = min(C.ARCHITECTURES, key=lambda a: best[a]["score_cv"])
@@ -177,7 +177,7 @@ def run(quick: bool, verbose: bool, equal_size: bool):
     make_figures(ds, test_split, test_preds, comp, winner)
     make_learning_curves(tracker.history(), best)
     make_epoch_selection(all_cv, best)
-    tracker.save(C.REPORTS_DIR / "training_history.csv")
+    tracker.save(C.TABLES_DIR / "training_history.csv")
 
     # Intervalo final: residuos fuera de muestra de CV + test (incluye el régimen más reciente)
     w = best[winner]
@@ -192,7 +192,7 @@ def run(quick: bool, verbose: bool, equal_size: bool):
     # ------------------------------------------------------------------ 4) Igual tamaño
     if equal_size:
         equal_size_comparison(ds, test_split, pd.DataFrame(cv_rows), tracker)
-    tracker.save(C.REPORTS_DIR / "training_history.csv")
+    tracker.save(C.TABLES_DIR / "training_history.csv")
 
 
 # ----------------------------------------------------------------------------
@@ -228,7 +228,7 @@ def equal_size_comparison(ds: Dataset, test_split, cv_df: pd.DataFrame, tracker:
                   + "  ".join(f"{n}: {row[f'mejora_{n}_%']:+.1f}% (±{row[f'std_{n}']:.1f})" for n in C.HORIZONS),
                   flush=True)
     eq = pd.DataFrame(rows)
-    eq.to_csv(C.REPORTS_DIR / "comparison_equal_size.csv", index=False)
+    eq.to_csv(C.TABLES_DIR / "comparison_equal_size.csv", index=False)
     write_equal_size_markdown(eq)
     return eq
 
@@ -259,10 +259,10 @@ def write_equal_size_markdown(eq: pd.DataFrame):
 
 
 def run_equal_size_only(verbose: bool):
-    """Regenera solo la comparativa a igual tamaño reutilizando reports/cv_results.csv."""
-    cv_path = C.REPORTS_DIR / "cv_results.csv"
+    """Regenera solo la comparativa a igual tamaño reutilizando reports/tables/cv_results.csv."""
+    cv_path = C.TABLES_DIR / "cv_results.csv"
     if not cv_path.exists():
-        raise FileNotFoundError("Falta reports/cv_results.csv: ejecuta antes el experimento completo")
+        raise FileNotFoundError("Falta reports/tables/cv_results.csv: ejecuta antes el experimento completo")
     ds = Dataset.load()
     test_split = make_split(ds, train_end=C.TEST_START, eval_start=C.TEST_START)
     equal_size_comparison(ds, test_split, pd.read_csv(cv_path), Tracker(C.RUNS_DIR, verbose=verbose))
@@ -394,7 +394,7 @@ if __name__ == "__main__":
     ap.add_argument("--quiet", action="store_true", help="no mostrar una línea por época")
     ap.add_argument("--skip-equal-size", action="store_true", help="omitir la comparativa a igual tamaño")
     ap.add_argument("--equal-size-only", action="store_true",
-                    help="regenerar solo la comparativa a igual tamaño (usa reports/cv_results.csv)")
+                    help="regenerar solo la comparativa a igual tamaño (usa reports/tables/cv_results.csv)")
     args = ap.parse_args()
     torch.set_num_threads(max(1, torch.get_num_threads()))
     if args.equal_size_only:

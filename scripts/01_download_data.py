@@ -79,9 +79,9 @@ datos = datos[datos.index.dayofweek < 5]      # días laborables
 datos = datos.loc[START:]
 datos.index.name = 'Date'
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+RAW_DIR = Path(__file__).resolve().parent.parent / "data" / "raw"
+RAW_DIR.mkdir(parents=True, exist_ok=True)
 
-datos.to_csv(DATA_DIR / "petroleo_dataset.csv")
+datos.to_csv(RAW_DIR / "brent_dataset_raw.csv")
 print(datos.shape)
 print(datos.tail())

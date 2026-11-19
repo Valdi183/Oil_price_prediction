@@ -3,7 +3,7 @@ Validación fuera de muestra del modelo: ¿funciona, cuándo acierta y cuándo s
 
 El modelo se entrenó con datos hasta el 31/12/2022 y aquí se comparan sus predicciones con
 los valores reales que se produjeron después (2023 → hoy). No entrena nada: usa las
-predicciones de test guardadas por scripts/significance.py.
+predicciones de test guardadas por scripts/04_significance_test.py.
 
 Calcula:
   1. MAE, MSE, RMSE, R² sobre el precio y R² fuera de muestra frente al ingenuo, por red y horizonte.
@@ -11,8 +11,8 @@ Calcula:
   3. Error móvil de la RNN frente al ingenuo (cuándo lo bate y cuándo no).
   4. Los peores fallos de la RNN por horizonte, con su fecha.
 
-Uso:  poetry run python scripts/error_analysis.py
-Salidas: reports/test_metrics.csv, reports/error_by_period.csv, reports/worst_errors.csv,
+Uso:  poetry run python scripts/05_error_analysis.py
+Salidas: reports/tables/test_metrics.csv, reports/tables/error_by_period.csv, reports/tables/worst_errors.csv,
          reports/error_analysis.md, reports/figures/error_analysis.png
 """
 import sys
@@ -27,10 +27,10 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from oilcast import config as C  # noqa: E402
-from oilcast.evaluation import (NAIVE, NETS, REGIMES, by_group, full_metrics, load_test_predictions,  # noqa: E402
+from src import config as C  # noqa: E402
+from src.evaluation import (NAIVE, NETS, REGIMES, by_group, full_metrics, load_test_predictions,  # noqa: E402
                                 regimes, rolling_ratio, worst_errors)
-from oilcast.pipeline import Dataset  # noqa: E402
+from src.training import Dataset  # noqa: E402
 
 COLORS = {"RNN": "#d9902f", "LSTM": "#1f77b4", "GRU": "#d62728", "Combinación": "#8c8c8c"}
 
@@ -49,15 +49,15 @@ def main():
     brent = ds.df["brent"]
 
     met = full_metrics(tp)
-    met.to_csv(C.REPORTS_DIR / "test_metrics.csv", index=False)
+    met.to_csv(C.TABLES_DIR / "test_metrics.csv", index=False)
 
     years = tp["fecha_origen"].dt.year.astype(str)
     reg, (q1, q2), _ = regimes(tp, brent)
     periods = pd.concat([by_group(tp, years, "año"), by_group(tp, reg, "régimen")], ignore_index=True)
-    periods.to_csv(C.REPORTS_DIR / "error_by_period.csv", index=False)
+    periods.to_csv(C.TABLES_DIR / "error_by_period.csv", index=False)
 
     worst = worst_errors(tp)
-    worst.to_csv(C.REPORTS_DIR / "worst_errors.csv", index=False)
+    worst.to_csv(C.TABLES_DIR / "worst_errors.csv", index=False)
 
     roll = rolling_ratio(tp)
     make_figure(tp, roll)

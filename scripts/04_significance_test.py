@@ -2,7 +2,7 @@
 Significación estadística de la comparativa y combinación de referencia.
 
 Reentrena SOLO la fase de test de las tres redes ganadoras (configuración y épocas ya
-elegidas en la validación cruzada, leídas de reports/comparison.csv; mismas semillas) y:
+elegidas en la validación cruzada, leídas de reports/tables/comparison.csv; mismas semillas) y:
 
   1. Comprueba que reproduce las cifras de la comparativa.
   2. Test de Diebold-Mariano (pérdida cuadrática en $/barril, varianza HAC con h-1 retardos
@@ -11,8 +11,8 @@ elegidas en la validación cruzada, leídas de reports/comparison.csv; mismas se
   3. Fila de referencia "combinación": media de las predicciones de las tres redes.
      Es solo informativa: el modelo integrado en la aplicación sigue siendo una única red.
 
-Uso:  poetry run python scripts/significance.py
-Salidas: reports/significance.csv, reports/significance.md, reports/test_predictions.csv
+Uso:  poetry run python scripts/04_significance_test.py
+Salidas: reports/tables/significance.csv, reports/significance.md, reports/tables/test_predictions.csv
 """
 import re
 import sys
@@ -25,8 +25,9 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from oilcast import config as C
-from oilcast.pipeline import Dataset, horizon_metrics, make_split, train_ensemble
+from src import config as C
+from src.evaluation import horizon_metrics
+from src.training import Dataset, make_split, train_ensemble
 
 NAIVE = "Ingenuo"
 COMBO = "Combinación"
@@ -59,7 +60,7 @@ def stars(p: float) -> str:
 
 
 def main():
-    comp = pd.read_csv(C.REPORTS_DIR / "comparison.csv")
+    comp = pd.read_csv(C.TABLES_DIR / "comparison.csv")
     ds = Dataset.load()
     split = make_split(ds, train_end=C.TEST_START, eval_start=C.TEST_START)
     price0 = ds.df["brent"].values[split.ev_origins]
@@ -104,7 +105,7 @@ def main():
                          "DM": stat, "p_valor": p, "significativo_5%": p < 0.05,
                          "n": len(errors[a][j])})
     sig = pd.DataFrame(rows)
-    sig.to_csv(C.REPORTS_DIR / "significance.csv", index=False)
+    sig.to_csv(C.TABLES_DIR / "significance.csv", index=False)
 
     # ---------------------------------------------------------------- 4) Fila de la combinación
     combo_mets = horizon_metrics(preds[COMBO], split.y_ev, price0)
@@ -115,7 +116,7 @@ def main():
         out[f"real_{hname}"] = price0 * np.exp(split.y_ev[:, j])
         for name, p in preds.items():
             out[f"{name}_{hname}"] = price0 * np.exp(p[:, j])
-    out.to_csv(C.REPORTS_DIR / "test_predictions.csv", index=False, float_format="%.3f")
+    out.to_csv(C.TABLES_DIR / "test_predictions.csv", index=False, float_format="%.3f")
 
     write_markdown(sig, combo_mets, comp, info)
     print("\n" + (C.REPORTS_DIR / "significance.md").read_text(encoding="utf-8"))

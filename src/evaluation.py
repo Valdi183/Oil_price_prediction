@@ -1,5 +1,9 @@
-"""Evaluación fuera de muestra a partir de las predicciones de test guardadas
-(reports/test_predictions.csv, generado por scripts/significance.py): métricas completas
+"""Métricas de evaluación.
+
+1. horizon_metrics / residual_quantiles / interval_coverage: métricas por horizonte que usan el
+   entrenamiento y la validación cruzada (scripts/03 y 04).
+2. Evaluación fuera de muestra a partir de las predicciones de test guardadas
+(reports/tables/test_predictions.csv, generado por scripts/04_significance_test.py): métricas completas
 (MAE, MSE, RMSE, R²), análisis de errores por año y por régimen de volatilidad, error móvil
 frente al ingenuo y peores fallos. No entrena nada: solo compara predicción con realidad.
 
@@ -17,15 +21,68 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .config import HORIZONS, REPORTS_DIR
+from .config import HORIZONS, INTERVAL_HIGH_Q, INTERVAL_LOW_Q, TABLES_DIR
 
 NAIVE = "Ingenuo"
 NETS = ["RNN", "LSTM", "GRU", "Combinación"]
 REGIMES = ["Calma", "Normal", "Turbulencia"]
 
 
+# ----------------------------------------------------------------------------
+# Métricas (en dólares por barril)
+# ----------------------------------------------------------------------------
+def horizon_metrics(pred_lr: np.ndarray, true_lr: np.ndarray, price0: np.ndarray) -> list[dict]:
+    """Métricas por horizonte. pred_lr/true_lr: log-rentabilidades (n, 3); price0: precio en t."""
+    rows = []
+    for j, (name, h) in enumerate(HORIZONS.items()):
+        m = ~np.isnan(true_lr[:, j])
+        if m.sum() == 0:
+            continue
+        p0 = price0[m]
+        real = p0 * np.exp(true_lr[m, j])
+        pred = p0 * np.exp(pred_lr[m, j])
+        err, err_naive = pred - real, p0 - real
+        mse, mse_n = np.mean(err ** 2), np.mean(err_naive ** 2)
+        mae, mae_n = np.mean(np.abs(err)), np.mean(np.abs(err_naive))
+        moved = true_lr[m, j] != 0
+        dir_acc = np.mean(np.sign(pred_lr[m, j][moved]) == np.sign(true_lr[m, j][moved]))
+        rows.append({
+            "horizonte": name, "h": h, "n": int(m.sum()),
+            "MSE": mse, "MAE": mae, "RMSE": np.sqrt(mse),
+            "MAE_ingenuo": mae_n, "RMSE_ingenuo": np.sqrt(mse_n),
+            "mejora_RMSE_%": 100 * (1 - np.sqrt(mse) / np.sqrt(mse_n)),
+            "mejora_MAE_%": 100 * (1 - mae / mae_n),
+            "acierto_direccion_%": 100 * dir_acc,
+        })
+    return rows
+
+
+def residual_quantiles(residuals: np.ndarray) -> dict:
+    """Cuantiles empíricos de (real - predicho) en log-rentabilidad -> intervalo del 80 %."""
+    out = {}
+    for j, name in enumerate(HORIZONS):
+        r = residuals[:, j][~np.isnan(residuals[:, j])]
+        out[name] = (float(np.quantile(r, INTERVAL_LOW_Q)), float(np.quantile(r, INTERVAL_HIGH_Q)))
+    return out
+
+
+def interval_coverage(pred_lr, true_lr, quantiles) -> dict:
+    cov = {}
+    for j, name in enumerate(HORIZONS):
+        m = ~np.isnan(true_lr[:, j])
+        lo, hi = quantiles[name]
+        inside = (true_lr[m, j] >= pred_lr[m, j] + lo) & (true_lr[m, j] <= pred_lr[m, j] + hi)
+        cov[name] = 100 * float(inside.mean())
+    return cov
+
+
+# ----------------------------------------------------------------------------
+# Evaluación fuera de muestra (predicciones de test guardadas)
+# ----------------------------------------------------------------------------
+
+
 def load_test_predictions() -> pd.DataFrame:
-    return pd.read_csv(REPORTS_DIR / "test_predictions.csv", parse_dates=["fecha_origen"])
+    return pd.read_csv(TABLES_DIR / "test_predictions.csv", parse_dates=["fecha_origen"])
 
 
 def _arrays(tp: pd.DataFrame, horizon: str, model: str):

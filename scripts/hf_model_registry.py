@@ -2,8 +2,8 @@
 Descarga o publica el modelo de producción en Hugging Face Hub.
 
 Uso:
-    poetry run python scripts/model_hub.py download   # models/ <- Hub (actualización diaria, sin entrenar)
-    poetry run python scripts/model_hub.py upload     # models/ -> Hub (tras reentrenar; requiere HF_TOKEN)
+    poetry run python scripts/hf_model_registry.py download   # models/ <- Hub (actualización diaria, sin entrenar)
+    poetry run python scripts/hf_model_registry.py upload     # models/ -> Hub (tras reentrenar; requiere HF_TOKEN)
 
 Variables de entorno: HF_MODEL_REPO="usuario/nombre" (obligatoria) y HF_TOKEN (para publicar).
 """
@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from oilcast.hub import download_production, upload_production  # noqa: E402
+from src.model_registry import download_production, upload_production  # noqa: E402
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()

@@ -29,7 +29,7 @@ FACTORS = {
 
 def reliability(metrics: dict | None, p_value: float | None = None) -> tuple[str, str]:
     """Devuelve (etiqueta, frase) según la comparativa con el modelo ingenuo en test.
-    p_value: p-valor del test de Diebold-Mariano frente al ingenuo (reports/significance.csv).
+    p_value: p-valor del test de Diebold-Mariano frente al ingenuo (reports/tables/significance.csv).
     Si se conoce, una mejora que no es estadísticamente significativa no cuenta como fiable."""
     if not metrics:
         return "desconocida", "No hay métricas de evaluación disponibles para este horizonte."

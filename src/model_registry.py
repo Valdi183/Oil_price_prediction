@@ -15,8 +15,7 @@ import json
 import os
 from datetime import datetime
 
-from .config import MODELS_DIR
-from .pipeline import PROD_META, PROD_MODEL, PROD_PRE
+from .config import MODELS_DIR, PROD_META, PROD_MODEL, PROD_PRE
 
 FILES = [PROD_MODEL.name, PROD_PRE.name, PROD_META.name]
 
@@ -87,7 +86,7 @@ def upload_production(repo: str | None = None, token: str | None = None, private
         raise PermissionError("Falta HF_TOKEN (token de Hugging Face con permiso de escritura).")
     missing = [n for n in FILES if not (MODELS_DIR / n).exists()]
     if missing:
-        raise FileNotFoundError(f"No existen en models/: {missing}. Ejecuta antes scripts/retrain.py")
+        raise FileNotFoundError(f"No existen en models/: {missing}. Ejecuta antes scripts/06_train_production_model.py")
 
     meta = json.loads(PROD_META.read_text(encoding="utf-8"))
     (MODELS_DIR / "README.md").write_text(_model_card(meta, rid), encoding="utf-8")

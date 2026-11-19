@@ -1,12 +1,12 @@
 """
-Exporta a site/data/*.json todo lo que muestra la web estática (GitHub Pages).
+Exporta a app/data/*.json todo lo que muestra la web estática (GitHub Pages).
 
 Todo el cálculo (descarga de datos, predicción del conjunto de redes, intervalos del 80 %,
 explicaciones en lenguaje sencillo, localización de los eventos del ciclo económico y la
 comparativa de modelos) se hace aquí, en Python. La web solo lee estos ficheros y los dibuja.
 
 Uso:
-    poetry run python scripts/export_site.py          # requiere data/ y models/ (retrain.py)
+    poetry run python scripts/07_export_app_data.py          # requiere data/ y models/ (06_train_production_model.py)
 
 Ficheros generados (cifras redondeadas a 2 decimales):
     forecast.json  último precio, variaciones, predicción por horizonte, explicación y fiabilidad
@@ -32,17 +32,18 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from oilcast.config import (CV_FOLDS, HORIZONS, INTERVAL_HIGH_Q, INTERVAL_LOW_Q, REPORTS_DIR,  # noqa: E402
-                            TEST_START, WINDOW)
-from oilcast.data import clean, load_raw  # noqa: E402
-from oilcast.evaluation import (REGIMES, by_group, full_metrics, load_test_predictions, regimes,  # noqa: E402
+from src.config import (APP_DATA_DIR, CV_FOLDS, HORIZONS, INTERVAL_HIGH_Q, INTERVAL_LOW_Q,  # noqa: E402
+                        TABLES_DIR, TEST_START, WINDOW)
+from src.data_cleaning import clean, load_raw  # noqa: E402
+from src.evaluation import (REGIMES, by_group, full_metrics, load_test_predictions, regimes,  # noqa: E402
                                 rolling_ratio, worst_errors)
-from oilcast.events import locate_events, recent_movements  # noqa: E402
-from oilcast.explain import explain, reliability  # noqa: E402
-from oilcast.pipeline import Dataset, forecast, load_production  # noqa: E402
+from src.economic_events import locate_events, recent_movements  # noqa: E402
+from src.explanations import explain, reliability  # noqa: E402
+from src.prediction import forecast, load_production  # noqa: E402
+from src.training import Dataset  # noqa: E402
 
-SITE_DATA = ROOT / "site" / "data"
-WORKFLOW_FILE = "update-site.yml"
+SITE_DATA = APP_DATA_DIR
+WORKFLOW_FILE = "daily_forecast.yml"
 DEFAULT_REPO = "Valdi183/Oil_price_prediction"
 
 SHORT_LABELS = {"corto": "Corto plazo", "medio": "Medio plazo", "largo": "Largo plazo"}
@@ -189,10 +190,10 @@ def _direction_acc(p0: np.ndarray, pred: np.ndarray, real: np.ndarray) -> float:
 
 
 def export_models(meta: dict, sig: pd.DataFrame, ds_brent: pd.Series) -> None:
-    comp = pd.read_csv(REPORTS_DIR / "comparison.csv")
-    equal = pd.read_csv(REPORTS_DIR / "comparison_equal_size.csv")
-    cv = pd.read_csv(REPORTS_DIR / "cv_results.csv")
-    tp = pd.read_csv(REPORTS_DIR / "test_predictions.csv", parse_dates=["fecha_origen"])
+    comp = pd.read_csv(TABLES_DIR / "comparison.csv")
+    equal = pd.read_csv(TABLES_DIR / "comparison_equal_size.csv")
+    cv = pd.read_csv(TABLES_DIR / "cv_results.csv")
+    tp = pd.read_csv(TABLES_DIR / "test_predictions.csv", parse_dates=["fecha_origen"])
 
     comp_cols = ["red", "horizonte", "dias", "MAE", "RMSE", "MAE_ingenuo", "RMSE_ingenuo", "mejora_RMSE_%",
                  "mejora_media_miembros_%", "std_mejora_RMSE_%", "mejora_MAE_%", "acierto_direccion_%",
@@ -204,7 +205,7 @@ def export_models(meta: dict, sig: pd.DataFrame, ds_brent: pd.Series) -> None:
         r["selected"] = r["red"] == meta["arch"]
 
     # Fila de la combinación (media de las tres redes): solo referencia, se recalcula de las
-    # predicciones de test guardadas por scripts/significance.py.
+    # predicciones de test guardadas por scripts/04_significance_test.py.
     nets = comp.drop_duplicates("red").set_index("red")
     p0 = tp["brent_origen"].values
     for name, h in HORIZONS.items():
@@ -223,7 +224,7 @@ def export_models(meta: dict, sig: pd.DataFrame, ds_brent: pd.Series) -> None:
             "hiperparametros": "media de las tres redes", "reference": True, "selected": False,
         })
 
-    # MSE y R² (sobre el precio y fuera de muestra frente al ingenuo) de oilcast.evaluation
+    # MSE y R² (sobre el precio y fuera de muestra frente al ingenuo) de src.evaluation
     full = full_metrics(tp).set_index(["modelo", "horizonte"])
     for r in rows:
         f = full.loc[(r["red"], r["horizonte"])]
@@ -331,7 +332,7 @@ def main() -> None:
     print("Exportando la web a", SITE_DATA.relative_to(ROOT))
     ds = Dataset.load()
     _, _, meta = load_production()
-    sig = pd.read_csv(REPORTS_DIR / "significance.csv")
+    sig = pd.read_csv(TABLES_DIR / "significance.csv")
     fc = export_forecast(ds, meta, sig)
     brent = export_history(fc["last_date"])
     export_events(brent)

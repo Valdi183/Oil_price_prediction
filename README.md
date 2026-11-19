@@ -6,6 +6,8 @@ Caso de uso III de la asignatura *Aprendizaje automático* (UAX): comparar una *
 
 **Modelo en producción (Hugging Face Hub):** <https://huggingface.co/Valdi183/brent-rnn-forecast>
 
+**Presentación (portada y 5 diapositivas):** [docs/presentacion_brent_forecast.pdf](docs/presentacion_brent_forecast.pdf)
+
 > Herramienta de apoyo a la decisión, no es una recomendación de inversión.
 
 ## Qué hace la aplicación

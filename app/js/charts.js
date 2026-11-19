@@ -4,7 +4,7 @@ import { fmt, stars, pValue, localMs, isoLocal, shiftMonths, prefersReducedMotio
 const HLABEL = { corto: 'Corto plazo', medio: 'Medio plazo', largo: 'Largo plazo' };
 const MODEL_COLOR = (pal) => ({ RNN: pal.accent, LSTM: pal.lstm, GRU: pal.gru, 'Combinación': pal.combo });
 
-function tooltipBase(pal) {
+export function tooltipBase(pal) {
   return {
     backgroundColor: pal.tooltipBg,
     borderColor: pal.borderStrong,
@@ -16,7 +16,7 @@ function tooltipBase(pal) {
   };
 }
 
-function axisBase(pal) {
+export function axisBase(pal) {
   return {
     axisLine: { lineStyle: { color: pal.border } },
     axisTick: { show: false },
@@ -25,14 +25,14 @@ function axisBase(pal) {
   };
 }
 
-function hexToRgba(hex, a) {
+export function hexToRgba(hex, a) {
   const h = hex.replace('#', '');
   if (h.length !== 6) return hex;
   const n = parseInt(h, 16);
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
 }
 
-function row(color, name, value, dash = false) {
+export function row(color, name, value, dash = false) {
   const sw = dash
     ? `style="background: repeating-linear-gradient(90deg, ${color} 0 3px, transparent 3px 5px); width: 12px"`
     : `style="background:${color}"`;
@@ -380,5 +380,92 @@ export function rollingOption(models, horizon, pal) {
       name: 'Ingenuo = 1', type: 'line', data: [[dates[0], 1], [dates[dates.length - 1], 1]], showSymbol: false, silent: true,
       lineStyle: { color: pal.muted, type: 'dashed', width: 1 }, tooltip: { show: false },
     }],
+  };
+}
+
+// ------------------------------------------------------------------ simulador: trayectoria y rangos
+// sim: { dates, center, p5, p10, p90, p95, anchors: [{date, price, h}] } ya calculados (tools.js)
+export function simOption(history, sim, sel, pal) {
+  const n = 130;
+  const hd = history.dates.slice(-n), hb = history.brent.slice(-n);
+  const lastDate = hd[hd.length - 1], p0 = hb[hb.length - 1];
+  const d = [lastDate, ...sim.dates];
+  const z = (arr) => [p0, ...arr];
+  const c = z(sim.center), p5 = z(sim.p5), p10 = z(sim.p10), p90 = z(sim.p90), p95 = z(sim.p95);
+  const pts = (arr) => d.map((x, i) => [x, arr[i]]);
+  const width = (hi, lo) => d.map((x, i) => [x, hi[i] - lo[i]]);
+  const base = { type: 'line', symbol: 'none', silent: true, emphasis: { disabled: true }, lineStyle: { opacity: 0 } };
+  const series = [
+    { ...base, id: 'b90-low', name: 'b90-low', stack: 'b90', data: pts(p5), areaStyle: { opacity: 0 }, z: 1 },
+    { ...base, id: 'b90', name: 'Rango 90 %', stack: 'b90', data: width(p95, p5), z: 1, areaStyle: { color: hexToRgba(pal.accent, 0.12) } },
+    { ...base, id: 'b80-low', name: 'b80-low', stack: 'b80', data: pts(p10), areaStyle: { opacity: 0 }, z: 2 },
+    { ...base, id: 'b80', name: 'Rango 80 %', stack: 'b80', data: width(p90, p10), z: 2, areaStyle: { color: hexToRgba(pal.accent, 0.26) } },
+    { id: 'hist', name: 'Brent', type: 'line', data: hd.map((x, i) => [x, hb[i]]), showSymbol: false,
+      lineStyle: { width: 1.8, color: pal.accent }, itemStyle: { color: pal.accent }, z: 5 },
+    { id: 'center', name: 'Predicción simulada', type: 'line', data: pts(c), showSymbol: false,
+      lineStyle: { width: 2, type: [6, 4], color: pal.accent2 }, itemStyle: { color: pal.accent2 }, z: 6,
+      markLine: { silent: true, symbol: 'none', animation: false, lineStyle: { color: pal.text, type: 'solid', width: 1, opacity: 0.5 },
+        label: { show: false }, data: [{ xAxis: sel.date }] } },
+    { id: 'anchors', name: 'Salida directa de la red', type: 'scatter', data: sim.anchors.map((a) => [a.date, a.price]),
+      symbol: 'diamond', symbolSize: 9, z: 7, itemStyle: { color: pal.surface, borderColor: pal.accent2, borderWidth: 2 } },
+    { id: 'sel', name: 'Plazo elegido', type: 'scatter', data: [[sel.date, sel.price]], symbolSize: 13, z: 9,
+      itemStyle: { color: sel.price >= p0 ? pal.up : pal.down, borderColor: pal.surface, borderWidth: 2 },
+      label: { show: true, position: 'top', distance: 8, fontFamily: pal.fontMono, fontWeight: 600, fontSize: 12, color: pal.text,
+        backgroundColor: pal.surface, borderColor: pal.borderStrong, borderWidth: 1, borderRadius: 6, padding: [3, 6],
+        formatter: () => fmt.price(sel.price) } },
+  ];
+  return {
+    animation: !prefersReducedMotion(), animationDuration: 500, animationDurationUpdate: 300,
+    grid: { left: 8, right: 18, top: 28, bottom: 8, containLabel: true },
+    tooltip: {
+      ...tooltipBase(pal), trigger: 'axis', axisPointer: { type: 'line', lineStyle: { color: pal.muted, type: 'dashed' } },
+      formatter: (params) => {
+        const date = isoLocal(params[0].axisValue);
+        const k = d.indexOf(date);          // > 0: día de la simulación; si no, histórico
+        if (k > 0) {
+          return `<div class="bf-tip"><div class="bf-tip__date">${fmt.date(date)} · ${k} días hábiles</div>`
+            + row(pal.accent2, 'Predicción simulada', fmt.price(c[k]), true)
+            + row(pal.accent, 'Rango 80 %', `${fmt.price(p10[k])} – ${fmt.price(p90[k])}`)
+            + row(hexToRgba(pal.accent, 0.4), 'Rango 90 %', `${fmt.price(p5[k])} – ${fmt.price(p95[k])}`) + '</div>';
+        }
+        const v = params.find((p) => p.seriesId === 'hist');
+        return v ? `<div class="bf-tip"><div class="bf-tip__date">${fmt.date(date)}</div>${row(pal.accent, 'Brent', fmt.price(v.value[1]))}</div>` : '';
+      },
+    },
+    legend: { show: false },
+    xAxis: { type: 'time', ...axisBase(pal), splitLine: { show: false }, axisLabel: { ...axisBase(pal).axisLabel, hideOverlap: true } },
+    yAxis: { type: 'value', scale: true, ...axisBase(pal), axisLine: { show: false }, axisLabel: { ...axisBase(pal).axisLabel, formatter: (v) => fmt.price(v, 0) } },
+    series,
+  };
+}
+
+// ------------------------------------------------------------------ backtest: evolución del capital
+// lines: [{ name, color, points: [[fecha, capital]], dashed }]
+export function backtestOption(lines, capital, pal) {
+  return {
+    animation: !prefersReducedMotion(), animationDuration: 700,
+    grid: { left: 8, right: 16, top: 36, bottom: 8, containLabel: true },
+    legend: { top: 0, data: lines.map((l) => l.name), textStyle: { color: pal.text2, fontFamily: pal.fontUi, fontSize: 11 }, itemWidth: 14, itemHeight: 3 },
+    tooltip: {
+      ...tooltipBase(pal), trigger: 'axis',
+      formatter: (params) => {
+        const date = isoLocal(params[0].axisValue);
+        const rows = params.filter((p) => p.seriesName !== 'Capital inicial').map((p) => row(p.color, p.seriesName, `${fmt.price(p.value[1], 0)} · ${fmt.pct(100 * (p.value[1] / capital - 1), 0)}`, p.seriesName === 'Comprar y mantener'));
+        return `<div class="bf-tip"><div class="bf-tip__date">${fmt.date(date)}</div>${rows.join('')}</div>`;
+      },
+    },
+    xAxis: { type: 'time', ...axisBase(pal), splitLine: { show: false } },
+    yAxis: { type: 'value', scale: true, ...axisBase(pal), axisLine: { show: false },
+      axisLabel: { ...axisBase(pal).axisLabel, formatter: (v) => fmt.compact(v) } },
+    series: [
+      ...lines.map((l) => ({
+        name: l.name, type: 'line', data: l.points, showSymbol: false, step: 'end',
+        lineStyle: { width: l.main ? 2.4 : 1.5, color: l.color, type: l.dashed ? [5, 4] : 'solid' }, itemStyle: { color: l.color },
+        z: l.main ? 5 : 3,
+        ...(l.main ? { areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: hexToRgba(l.color, 0.2) }, { offset: 1, color: hexToRgba(l.color, 0) }]), origin: 'start' } } : {}),
+      })),
+      { name: 'Capital inicial', type: 'line', data: [[lines[0].points[0][0], capital], [lines[0].points[lines[0].points.length - 1][0], capital]],
+        showSymbol: false, silent: true, lineStyle: { color: pal.muted, type: 'dashed', width: 1 }, tooltip: { show: false } },
+    ],
   };
 }

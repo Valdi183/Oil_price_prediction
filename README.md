@@ -13,6 +13,12 @@ Caso de uso III de la asignatura *Aprendizaje automático* (UAX): comparar una *
 - Muestra el último precio del Brent y, para cada horizonte, el **precio previsto, la variación esperada y el rango de incertidumbre del 80 %**, dibujado como un abanico sobre el histórico.
 - Genera una **explicación en lenguaje sencillo**: qué significa la predicción, qué fiabilidad tiene en ese horizonte según la comparativa (sello de Diebold-Mariano incluido) y qué factores pueden invalidarla.
 - Marca en el gráfico los **picos y caídas del ciclo económico** (2008, 2014-2016, 2020, 2022, 2025-2026…) con una línea de tiempo navegable que hace zoom al periodo.
+- **Simulador para inversores** (sin entrenar nada nuevo, a partir de las tres predicciones de la red y de los 2.447 errores reales que cometió fuera de muestra):
+  - **predicción a cualquier plazo** de 1 a 252 días hábiles, interpolada entre los tres horizontes con sus rangos del 80 % y del 90 % (en 5, 63 y 252 días coincide exactamente con las tarjetas);
+  - **probabilidad de precio**: probabilidad de que el Brent esté por encima o por debajo de un precio, o en qué percentil queda tu propia previsión;
+  - **calculadora de posición**: compra, venta o cobertura de una compra futura de crudo (en barriles o contratos de 1.000 barriles), con resultado central, rango del 80 %, probabilidad de ganar y pérdida en el escenario malo (VaR 95 %);
+  - **escenarios históricos**: qué pasaría con el precio y con tu posición si se repitiera, en ese plazo, el movimiento de 2008, 2014-2016, 2020, 2022 o 2026, junto a la variación habitual del Brent desde 2000;
+  - **backtest de señales** 2023 → hoy (periodo que la red nunca vio): operar según la dirección prevista frente a solo comprar, seguir la tendencia o comprar y mantener, con costes por operación, capital, máxima caída, resultados por año y la sensibilidad al día de inicio.
 - Presenta la **comparativa de las tres redes** frente al modelo ingenuo (tablas, barras, real vs predicho en test y test de significación) y justifica la elección.
 - Se **actualiza sola**: cada día una GitHub Action descarga los datos recientes y los pasa por el modelo ya entrenado (guardado en Hugging Face Hub), **sin reentrenar**, y vuelve a publicar la web. Reentrenar es una acción manual aparte; el botón «Actualizar ahora» lanza la Action.
 
@@ -48,10 +54,10 @@ Oil_price_prediction/
 | 1 | `01_download_data.py` | Descarga los datos diarios desde 2000 y los alinea con el calendario del Brent | `data/raw/` |
 | 2 | `02_clean_data.py` | Limpieza (festivos, WTI negativo, retraso de la EIA) y construcción de las 16 variables | `data/processed/`, `reports/data_cleaning.md` |
 | 3 | `03_train_compare_models.py` | Comparativa RNN vs LSTM vs GRU: validación cruzada walk-forward, test y modelo de producción (60-70 min en CPU) | `reports/comparison.md`, `reports/tables/`, `reports/figures/` |
-| 4 | `04_significance_test.py` | Test de Diebold-Mariano y combinación de referencia (reentrena las 3 redes en test) | `reports/significance.md`, `reports/tables/test_predictions.csv` |
+| 4 | `04_significance_test.py` | Test de Diebold-Mariano, combinación de referencia y errores fuera de muestra de la red elegida (reentrena las redes en test y la elegida en los folds de CV, ~1 min) | `reports/significance.md`, `reports/tables/test_predictions.csv`, `reports/tables/forecast_errors.csv` |
 | 5 | `05_error_analysis.py` | MAE, MSE, RMSE, R² y cuándo acierta y cuándo falla el modelo (sin entrenar) | `reports/error_analysis.md`, `reports/figures/error_analysis.png` |
 | 6 | `06_train_production_model.py` | Reentrena el modelo elegido con todos los datos (~13 s) | `models/` |
-| 7 | `07_export_app_data.py` | Predicción con el modelo de `models/` (solo inferencia) y JSON de la web | `app/data/*.json` |
+| 7 | `07_export_app_data.py` | Predicción con el modelo de `models/` (solo inferencia), simulador, escenarios, backtest y JSON de la web | `app/data/*.json` |
 | — | `hf_model_registry.py` | Descarga (`download`) o publica (`upload`) el modelo en Hugging Face Hub | `models/` ↔ Hub |
 
 ### Código fuente (`src/`)
@@ -66,13 +72,14 @@ Oil_price_prediction/
 | `prediction.py` | Carga del modelo de producción y predicción de los tres horizontes (lo que se ejecuta cada día) |
 | `evaluation.py` | Métricas (MAE, MSE, RMSE, R², acierto de dirección), intervalo del 80 % y análisis de errores |
 | `explanations.py` | Texto en lenguaje sencillo y nivel de fiabilidad por horizonte |
+| `decision_tools.py` | Simulador a 1-252 días (interpolación PCHIP del centro y cuantiles empíricos del error escalados con √t), movimientos históricos, escenarios de crisis y operaciones del backtest |
 | `economic_events.py` | Picos y caídas del ciclo económico localizados sobre la serie real |
 | `model_registry.py` | Publicación y descarga del modelo en Hugging Face Hub, con su ficha |
 | `experiment_tracking.py` | Registro de las curvas de entrenamiento (TensorBoard y CSV) |
 
 ## Arquitectura de la aplicación
 
-La aplicación es una web estática en GitHub Pages, pero **todo el cálculo lo hace Python** (descarga, limpieza, predicción, intervalos, explicaciones, comparativa) dentro de GitHub Actions. La web solo lee los JSON que genera `scripts/07_export_app_data.py` y los dibuja: ninguna cifra está escrita a mano.
+La aplicación es una web estática en GitHub Pages, pero **todo el cálculo lo hace Python** (descarga, limpieza, predicción, intervalos, explicaciones, comparativa) dentro de GitHub Actions. La web solo lee los JSON que genera `scripts/07_export_app_data.py` y los dibuja: ninguna cifra está escrita a mano. En el simulador, Python precalcula la trayectoria, los percentiles del error para cada día, los escenarios y las operaciones del backtest (`app/data/tools.json`); el navegador solo los combina con lo que escribe el usuario (días, precio, cantidad, costes).
 
 ```
 GitHub Actions  (.github/workflows/daily_forecast.yml · cron días laborables + ejecución manual)

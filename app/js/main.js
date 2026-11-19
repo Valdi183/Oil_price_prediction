@@ -3,6 +3,7 @@ import { fmt, localMs, shiftMonths, prefersReducedMotion } from './format.js';
 import { initTheme, palette } from './theme.js';
 import { sparklineOption, mainChartOption, barsOption, testOption, rollingOption } from './charts.js';
 import * as R from './render.js';
+import { createTools } from './tools.js';
 
 const HLABEL = { corto: 'Corto plazo', medio: 'Medio plazo', largo: 'Largo plazo' };
 
@@ -15,6 +16,7 @@ const state = {
 };
 const data = {};
 const charts = {};
+let tools = null;
 
 async function loadJson(name) {
   const res = await fetch(`data/${name}.json`, { cache: 'no-cache' });
@@ -38,6 +40,7 @@ function renderCharts() {
   charts.bars.setOption(barsOption(data.models, pal), { notMerge: true });
   charts.test.setOption(testOption(data.models, state.horizon, pal), { notMerge: true });
   charts.roll.setOption(rollingOption(data.models, state.horizon, pal), { notMerge: true });
+  if (tools) tools.renderCharts();
 }
 
 function updateHorizon(h) {
@@ -168,9 +171,9 @@ async function main() {
   initReveal();
   initNavSpy();
   try {
-    const [forecast, history, events, models, meta] = await Promise.all(
-      ['forecast', 'history', 'events', 'models', 'meta'].map(loadJson));
-    Object.assign(data, { forecast, history, events, models, meta });
+    const [forecast, history, events, models, meta, toolsData] = await Promise.all(
+      ['forecast', 'history', 'events', 'models', 'meta', 'tools'].map(loadJson));
+    Object.assign(data, { forecast, history, events, models, meta, tools: toolsData });
   } catch (err) {
     console.error(err);
     R.showToast(`No se pudieron cargar los datos de la web. Ejecuta scripts/07_export_app_data.py. (${err.message})`);
@@ -204,11 +207,14 @@ async function main() {
     charts.bars = initChart('bars-chart');
     charts.test = initChart('test-chart');
     charts.roll = initChart('roll-chart');
+    charts.sim = initChart('sim-chart');
+    charts.bt = initChart('bt-chart');
     renderCharts();
   } else {
     charts.main = { on() {}, setOption() {}, resize() {} };
-    charts.spark = charts.bars = charts.test = charts.roll = charts.main;
+    charts.spark = charts.bars = charts.test = charts.roll = charts.sim = charts.bt = charts.main;
   }
+  tools = createTools({ tools: data.tools, forecast: data.forecast, history: data.history, models: data.models, charts, palette });
   bindControls();
   syncRangeButtons();
   document.title = `Brent ${fmt.price(data.forecast.last_price)} · Brent Forecast`;

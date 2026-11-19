@@ -41,6 +41,7 @@
     </a>
     <nav class="nav__links" aria-label="Secciones">
       <a href="#prediccion">Predicción</a>
+      <a href="#simulador">Simulador</a>
       <a href="#ciclo">Ciclo económico</a>
       <a href="#modelos">Comparativa</a>
       <a href="#validacion">Validación</a>
@@ -158,6 +159,145 @@
           <dl class="kv" id="explain-metrics"></dl>
           <div class="seal" id="explain-seal"></div>
         </aside>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ SIMULADOR -->
+  <section class="section" id="simulador">
+    <div class="container">
+      <div class="section__head" data-reveal>
+        <span class="eyebrow">Simulador para inversores</span>
+        <h2 class="h2">Haz tu propia predicción, a cualquier plazo</h2>
+        <p class="lead">Elige cuántos días quieres mirar hacia delante y calcula la probabilidad de un precio, el resultado de una posición o el impacto de una crisis como las de 2008, 2020, 2022 o 2026. No se entrena nada nuevo: se combinan las tres predicciones de la red con los errores reales que cometió fuera de muestra.</p>
+      </div>
+
+      <div class="card sim-control" data-reveal>
+        <div class="sim-control__main">
+          <label class="eyebrow" for="sim-range">Horizonte de la simulación</label>
+          <div class="sim-control__value"><span class="mono" id="sim-days-label">21</span> días hábiles <span class="muted" id="sim-date">—</span></div>
+          <input class="range" type="range" id="sim-range" min="1" max="252" step="1" value="21" aria-describedby="sim-date">
+          <div class="range-ticks mono" aria-hidden="true"><span>1</span><span>63</span><span>126</span><span>189</span><span>252</span></div>
+        </div>
+        <div class="sim-control__side">
+          <label class="field">
+            <span class="field__label">Días hábiles</span>
+            <input class="input mono" type="number" id="sim-days" min="1" max="252" step="1" value="21" inputmode="numeric">
+          </label>
+          <div class="presets" id="sim-presets" role="group" aria-label="Plazos rápidos">
+            <button type="button" data-days="5">1 sem</button>
+            <button type="button" data-days="10">2 sem</button>
+            <button type="button" data-days="21">1 mes</button>
+            <button type="button" data-days="63">3 m</button>
+            <button type="button" data-days="126">6 m</button>
+            <button type="button" data-days="252">1 año</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="sim-grid">
+        <div class="card" data-reveal>
+          <div class="card__head">
+            <div>
+              <span class="eyebrow">Predicción simulada</span>
+              <h3 class="h3" id="sim-title">—</h3>
+            </div>
+            <span class="badge" id="sim-badge">—</span>
+          </div>
+          <div class="kpis kpis--sim" id="sim-kpis"></div>
+          <div class="chart chart--sim" id="sim-chart" role="img" aria-label="Trayectoria simulada del Brent con sus rangos del 80 % y del 90 %"></div>
+          <p class="small muted" id="sim-note"></p>
+        </div>
+
+        <div class="card tools" data-reveal>
+          <div class="segmented segmented--small tools__tabs" id="tool-tabs" role="tablist" aria-label="Herramientas">
+            <button type="button" role="tab" data-tool="prob" aria-selected="true">Probabilidad</button>
+            <button type="button" role="tab" data-tool="pos" aria-selected="false">Posición</button>
+            <button type="button" role="tab" data-tool="scen" aria-selected="false">Escenarios</button>
+          </div>
+
+          <div class="tool" id="tool-prob" role="tabpanel">
+            <p class="small muted">¿Qué probabilidad hay de que el Brent esté por encima o por debajo de un precio en el plazo elegido? Escribe un precio objetivo o tu propia previsión.</p>
+            <div class="form-row">
+              <label class="field">
+                <span class="field__label">Precio ($/barril)</span>
+                <input class="input mono" type="number" id="prob-price" min="1" step="0.5" inputmode="decimal">
+              </label>
+              <div class="presets presets--small" id="prob-presets" role="group" aria-label="Precios rápidos">
+                <button type="button" data-pct="-20">−20 %</button>
+                <button type="button" data-pct="-10">−10 %</button>
+                <button type="button" data-pct="10">+10 %</button>
+                <button type="button" data-pct="20">+20 %</button>
+              </div>
+            </div>
+            <div class="prob" id="prob-out"></div>
+          </div>
+
+          <div class="tool" id="tool-pos" role="tabpanel" hidden>
+            <div class="segmented segmented--small" id="pos-mode" role="group" aria-label="Tipo de operación">
+              <button type="button" data-mode="long" aria-pressed="true">Comprar</button>
+              <button type="button" data-mode="short" aria-pressed="false">Vender</button>
+              <button type="button" data-mode="buy" aria-pressed="false">Cubrir una compra</button>
+            </div>
+            <p class="small muted" id="pos-help"></p>
+            <div class="form-row form-row--3">
+              <label class="field">
+                <span class="field__label">Cantidad</span>
+                <input class="input mono" type="number" id="pos-qty" min="0" step="1" value="10" inputmode="decimal">
+              </label>
+              <label class="field">
+                <span class="field__label">Unidad</span>
+                <select class="input" id="pos-unit">
+                  <option value="contracts">Contratos (1.000 barriles)</option>
+                  <option value="barrels">Barriles</option>
+                </select>
+              </label>
+              <label class="field">
+                <span class="field__label" id="pos-price-label">Precio de entrada ($)</span>
+                <input class="input mono" type="number" id="pos-price" min="1" step="0.01" inputmode="decimal">
+              </label>
+            </div>
+            <div class="kpis kpis--tight" id="pos-out"></div>
+            <p class="small muted" id="pos-note"></p>
+          </div>
+
+          <div class="tool" id="tool-scen" role="tabpanel" hidden>
+            <p class="small muted" id="scen-intro"></p>
+            <div class="scen-base" id="scen-base"></div>
+            <div class="scen-list" id="scen-list"></div>
+            <p class="small muted">Movimiento real más extremo del Brent en ese número de días, empezando dentro de cada crisis, aplicado al precio actual. La columna de la derecha usa la posición definida en la pestaña «Posición».</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" data-reveal id="backtest">
+        <div class="card__head">
+          <div>
+            <span class="eyebrow">Backtest de señales · 2023 → hoy</span>
+            <h3 class="h3">¿Y si hubieras seguido al modelo?</h3>
+          </div>
+          <div class="bt-controls">
+            <div class="segmented segmented--small" id="bt-h" role="group" aria-label="Frecuencia de las operaciones">
+              <button type="button" data-bt="corto" aria-pressed="true">Semanal (5 d)</button>
+              <button type="button" data-bt="medio" aria-pressed="false">Trimestral (63 d)</button>
+            </div>
+            <label class="field field--inline">
+              <span class="field__label">Capital ($)</span>
+              <input class="input mono" type="number" id="bt-capital" min="100" step="100" value="10000" inputmode="numeric">
+            </label>
+            <label class="field field--inline">
+              <span class="field__label">Coste por operación (%)</span>
+              <input class="input mono" type="number" id="bt-cost" min="0" max="5" step="0.01" value="0.05" inputmode="decimal">
+            </label>
+          </div>
+        </div>
+        <p class="small muted">Cada operación se abre al precio del día y se cierra a los 5 (o 63) días hábiles, sin solaparse, con las predicciones del periodo de test: la red se entrenó solo hasta 2022, así que nunca vio estos precios.</p>
+        <div class="bt-kpis" id="bt-kpis"></div>
+        <div class="chart chart--test" id="bt-chart" role="img" aria-label="Evolución del capital de cada estrategia en el periodo de test"></div>
+        <div class="models-grid models-grid--bt">
+          <div class="table-wrap"><table class="table table--compact" id="bt-years"></table></div>
+          <div class="bt-note" id="bt-note"></div>
+        </div>
       </div>
     </div>
   </section>
